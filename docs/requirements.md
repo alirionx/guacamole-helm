@@ -159,7 +159,7 @@ The chart must work equally well in all three variants; no feature may work only
 - **CLI:** `helm upgrade --install <release> oci://... -n <ns> --create-namespace -f values.yaml --wait --atomic` works without further preparation (apart from the referenced Secrets). `--set` is usable for all values.
 - **Pipeline:** example workflows under `examples/pipelines/` for GitHub Actions and GitLab CI (lint → `helm diff` → deploy). Reliable exit codes: a failed init job makes `helm --wait` fail.
 - **GitOps:** Argo CD and Flux (`HelmRelease`), examples under `examples/gitops/`.
-- Chart distributed as an OCI artifact (ghcr.io) **and** optionally as a classic Helm repository (GitHub Pages).
+- Chart distributed as an OCI artifact (ghcr.io/alirionx/charts/guacamole) and as packaged chart (`.tgz` + `.sha256`) attached to each GitHub release. No classic Helm repository (GitHub Pages) — decided not needed.
 - Init jobs: Helm hooks under Helm, `argocd.argoproj.io/hook` annotations under Argo CD; behavior idempotent and identical in both cases.
 
 ### General requirements
