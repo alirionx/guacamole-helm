@@ -1,0 +1,16 @@
+# Gateway API: the HTTPRoute attaches to an existing Gateway. TLS is terminated at the Gateway's
+# HTTPS listener; a second route redirects the plain HTTP listener to HTTPS.
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: shared-gateway
+      namespace: gateway-system
+      sectionName: https
+  hostnames:
+    - guacamole.example.com
+  httpsRedirect:
+    enabled: true
+    parentRefs:
+      - name: shared-gateway
+        namespace: gateway-system
+        sectionName: http

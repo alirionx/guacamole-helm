@@ -1,0 +1,11 @@
+# Direct exposure via a LoadBalancer Service with a fixed IP (MetalLB). The RemoteIpValve stays
+# disabled, because clients connect directly. Sticky sessions via ClientIP affinity.
+guacamole:
+  replicaCount: 2
+  service:
+    type: LoadBalancer
+    port: 80
+    annotations:
+      metallb.io/loadBalancerIPs: "192.168.1.10"
+    externalTrafficPolicy: Local
+    sessionAffinity: ClientIP

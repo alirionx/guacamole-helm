@@ -1,0 +1,101 @@
+suite: guacamole configmap
+templates:
+  - guacamole/configmap.yaml
+values:
+  - values-external-pg.yaml
+release:
+  name: test
+tests:
+  - it: maps PostgreSQL settings to the image environment variables
+    asserts:
+      - equal:
+          path: data
+          value:
+            WEBAPP_CONTEXT: ROOT
+            LOG_LEVEL: info
+            GUACD_HOSTNAME: test-guacamole-guacd
+            GUACD_PORT: "4822"
+            POSTGRESQL_HOSTNAME: pg.example.svc
+            POSTGRESQL_PORT: "5432"
+            POSTGRESQL_DATABASE: guacamole
+            POSTGRESQL_USERNAME: guacamole
+  - it: maps MySQL settings to the image environment variables
+    set:
+      database.type: mysql
+    asserts:
+      - equal:
+          path: data.MYSQL_HOSTNAME
+          value: pg.example.svc
+      - equal:
+          path: data.MYSQL_PORT
+          value: "3306"
+      - equal:
+          path: data.MYSQL_DATABASE
+          value: guacamole
+      - equal:
+          path: data.MYSQL_USERNAME
+          value: guacamole
+      - notExists:
+          path: data.POSTGRESQL_HOSTNAME
+  - it: uses a custom port
+    set:
+      database.external.port: 6432
+    asserts:
+      - equal:
+          path: data.POSTGRESQL_PORT
+          value: "6432"
+  - it: converts nested context paths to Tomcat context names
+    set:
+      guacamole.contextPath: /remote/guacamole
+    asserts:
+      - equal:
+          path: data.WEBAPP_CONTEXT
+          value: remote#guacamole
+  - it: rejects a context path without leading slash
+    set:
+      guacamole.contextPath: guacamole
+    asserts:
+      - failedTemplate:
+          errorPattern: "must start with|does not match pattern"
+  - it: rejects a context path with trailing slash
+    set:
+      guacamole.contextPath: /guacamole/
+    asserts:
+      - failedTemplate:
+          errorPattern: "must not end with|does not match pattern"
+  - it: fails without database host
+    set:
+      database.external.host: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: database.external.host is required
+  - it: fails without database secret
+    set:
+      database.external.existingSecret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: database.external.existingSecret is required
+  - it: fails for an unknown database type
+    set:
+      database.type: oracle
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.type must be|database/type.: value must be one of"
+  - it: fails for an unknown database mode
+    set:
+      database.mode: cloud
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.mode must be|database/mode.: value must be one of"
+  - it: points the webapp to the embedded database
+    set:
+      database.mode: embedded
+      database.external.host: ""
+      database.external.existingSecret: ""
+    asserts:
+      - equal:
+          path: data.POSTGRESQL_HOSTNAME
+          value: test-guacamole-database
+      - equal:
+          path: data.POSTGRESQL_PORT
+          value: "5432"

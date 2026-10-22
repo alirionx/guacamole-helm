@@ -1,0 +1,46 @@
+suite: guacd
+templates:
+  - guacd/deployment.yaml
+  - guacd/service.yaml
+values:
+  - values-external-pg.yaml
+release:
+  name: test
+tests:
+  - it: uses the guacd image with appVersion
+    template: guacd/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/guacamole/guacd:1.6.0
+  - it: sets the log level
+    template: guacd/deployment.yaml
+    set:
+      guacd.logLevel: debug
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: LOG_LEVEL
+            value: debug
+  - it: runs as the guacd user with a TCP probe
+    template: guacd/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket.port
+          value: guacd
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+  - it: exposes guacd as ClusterIP service
+    template: guacd/service.yaml
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.selector["app.kubernetes.io/component"]
+          value: guacd

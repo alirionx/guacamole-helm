@@ -1,0 +1,11 @@
+# Embedded MariaDB instead of PostgreSQL. Passwords are taken from an existing Secret here;
+# omit existingSecret to let the chart generate them.
+#   kubectl create secret generic guacamole-db \
+#     --from-literal=password='...' --from-literal=superuser-password='...'
+database:
+  type: mysql
+  mode: embedded
+  embedded:
+    existingSecret: guacamole-db
+    secretKey: password
+    superuserSecretKey: superuser-password

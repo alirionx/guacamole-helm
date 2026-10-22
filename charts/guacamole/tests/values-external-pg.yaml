@@ -1,0 +1,6 @@
+database:
+  type: postgresql
+  mode: external
+  external:
+    host: pg.example.svc
+    existingSecret: db-secret

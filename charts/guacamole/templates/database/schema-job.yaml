@@ -1,0 +1,110 @@
+{{- if .Values.initJobs.schema.enabled }}
+{{- include "guacamole.database.validate" . }}
+{{- $component := "schema-init" }}
+{{- $mysql := eq .Values.database.type "mysql" }}
+{{- $clientImage := ternary .Values.initJobs.schema.mysqlClientImage .Values.initJobs.schema.postgresqlClientImage $mysql }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "guacamole.componentName" (dict "context" . "component" $component) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" $component) | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: {{ .Values.initJobs.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.initJobs.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "guacamole.componentLabels" (dict "context" . "component" $component) | nindent 8 }}
+        {{- with .Values.initJobs.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.initJobs.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "guacamole.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "guacamole.init.podCommon" . | nindent 6 }}
+      initContainers:
+        # The schema is generated from the guacamole image so that it always matches appVersion.
+        - name: generate-schema
+          image: {{ include "guacamole.image" (dict "image" .Values.guacamole.image "context" .) | quote }}
+          imagePullPolicy: {{ .Values.guacamole.image.pullPolicy }}
+          command: ["/bin/sh", "-c", "/opt/guacamole/bin/initdb.sh --{{ .Values.database.type }} > /work/schema.sql"]
+          securityContext:
+            {{- toYaml .Values.initJobs.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.initJobs.resources | nindent 12 }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      containers:
+        - name: schema-init
+          image: {{ include "guacamole.image" (dict "image" $clientImage "context" .) | quote }}
+          imagePullPolicy: {{ $clientImage.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - {{ .Files.Get (printf "files/schema-init-%s.sh" .Values.database.type) | quote }}
+          env:
+            - name: HOME
+              value: /tmp
+            {{- if $mysql }}
+            - name: DB_HOST
+              value: {{ include "guacamole.database.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "guacamole.database.port" . | quote }}
+            - name: DB_NAME
+              value: {{ include "guacamole.database.name" . | quote }}
+            - name: DB_USER
+              value: {{ include "guacamole.database.username" . | quote }}
+            - name: DB_PASSWORD
+            {{- else }}
+            - name: PGHOST
+              value: {{ include "guacamole.database.host" . | quote }}
+            - name: PGPORT
+              value: {{ include "guacamole.database.port" . | quote }}
+            - name: PGDATABASE
+              value: {{ include "guacamole.database.name" . | quote }}
+            - name: PGUSER
+              value: {{ include "guacamole.database.username" . | quote }}
+            - name: PGPASSWORD
+            {{- end }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "guacamole.database.secretName" . }}
+                  key: {{ include "guacamole.database.secretKey" . }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "guacamole.admin.secretName" . }}
+                  key: {{ .Values.auth.admin.secretKey }}
+            - name: ENFORCE_PASSWORD
+              value: {{ .Values.auth.admin.enforcePassword | quote }}
+            - name: SCHEMA_FILE
+              value: /work/schema.sql
+            - name: WAIT_TIMEOUT
+              value: {{ .Values.initJobs.databaseWaitTimeout | quote }}
+          securityContext:
+            {{- toYaml .Values.initJobs.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.initJobs.resources | nindent 12 }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: work
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+{{- end }}

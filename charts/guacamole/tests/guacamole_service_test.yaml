@@ -1,0 +1,64 @@
+suite: guacamole service
+templates:
+  - guacamole/service.yaml
+values:
+  - values-external-pg.yaml
+release:
+  name: test
+tests:
+  - it: defaults to ClusterIP on port 80
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.ports[0].port
+          value: 80
+      - notExists:
+          path: spec.loadBalancerSourceRanges
+  - it: supports LoadBalancer with its options
+    set:
+      guacamole.service.type: LoadBalancer
+      guacamole.service.loadBalancerClass: metallb
+      guacamole.service.loadBalancerSourceRanges: ["10.0.0.0/8"]
+      guacamole.service.externalTrafficPolicy: Local
+      guacamole.service.sessionAffinity: ClientIP
+      guacamole.service.nodePort: 30080
+      guacamole.service.annotations:
+        metallb.io/loadBalancerIPs: 192.168.1.10
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+      - notExists:
+          path: spec.loadBalancerIP
+      - equal:
+          path: spec.loadBalancerClass
+          value: metallb
+      - equal:
+          path: spec.loadBalancerSourceRanges
+          value: ["10.0.0.0/8"]
+      - equal:
+          path: spec.externalTrafficPolicy
+          value: Local
+      - equal:
+          path: spec.sessionAffinity
+          value: ClientIP
+      - equal:
+          path: spec.ports[0].nodePort
+          value: 30080
+      - equal:
+          path: metadata.annotations["metallb.io/loadBalancerIPs"]
+          value: 192.168.1.10
+  - it: ignores LoadBalancer-only options for ClusterIP
+    set:
+      guacamole.service.loadBalancerSourceRanges: ["10.0.0.0/8"]
+      guacamole.service.externalTrafficPolicy: Local
+      guacamole.service.nodePort: 30080
+    asserts:
+      - notExists:
+          path: spec.loadBalancerSourceRanges
+      - notExists:
+          path: spec.externalTrafficPolicy
+      - notExists:
+          path: spec.ports[0].nodePort

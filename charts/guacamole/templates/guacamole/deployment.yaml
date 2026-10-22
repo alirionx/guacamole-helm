@@ -1,0 +1,103 @@
+{{- include "guacamole.database.validate" . }}
+{{- $component := "guacamole" }}
+{{- $values := .Values.guacamole }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "guacamole.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ $values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/guacamole/configmap.yaml") . | sha256sum }}
+        {{- with $values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "guacamole.componentLabels" (dict "context" . "component" $component) | nindent 8 }}
+        {{- with $values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "guacamole.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      # The entrypoint of the official image enables extensions based on environment variable
+      # prefixes (e.g. MYSQL_*). Kubernetes service links would inject such variables.
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: guacamole
+          image: {{ include "guacamole.image" (dict "image" $values.image "context" .) | quote }}
+          imagePullPolicy: {{ $values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "guacamole.fullname" . }}
+          env:
+            - name: {{ include "guacamole.database.envPrefix" . }}_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "guacamole.database.secretName" . }}
+                  key: {{ include "guacamole.database.secretKey" . }}
+            {{- if .Values.auth.duo.enabled }}
+            - name: DUO_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.duo.existingSecret }}
+                  key: {{ .Values.auth.duo.secretKey }}
+            {{- end }}
+            {{- with $values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ include "guacamole.contextPathSlash" . }}
+              port: http
+            {{- toYaml $values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: {{ include "guacamole.contextPathSlash" . }}
+              port: http
+            {{- toYaml $values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            # The entrypoint generates GUACAMOLE_HOME and CATALINA_BASE below /tmp.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with $values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

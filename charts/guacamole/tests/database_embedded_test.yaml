@@ -1,0 +1,210 @@
+suite: embedded database
+templates:
+  - database/statefulset.yaml
+  - database/service.yaml
+  - database/configmap.yaml
+release:
+  name: test
+  namespace: guac
+tests:
+  - it: is the default mode and uses PostgreSQL 17
+    template: database/statefulset.yaml
+    asserts:
+      - isKind:
+          of: StatefulSet
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/postgres:17.11-alpine
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.podManagementPolicy
+          value: Parallel
+      - equal:
+          path: metadata.name
+          value: test-guacamole-database
+  - it: separates superuser and application user (PostgreSQL)
+    template: database/statefulset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: test-guacamole-database
+                key: superuser-password
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: APP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: test-guacamole-database
+                key: password
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGDATA
+            value: /var/lib/postgresql/data/pgdata
+  - it: runs the PostgreSQL version check before the database
+    template: database/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: version-check
+      - exists:
+          path: spec.template.metadata.annotations["checksum/init"]
+  - it: runs restricted as the PostgreSQL image user
+    template: database/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 70
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 70
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+  - it: allows overriding the database user id
+    template: database/statefulset.yaml
+    set:
+      database.embedded.podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 1234
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1234
+      - equal:
+          path: spec.template.spec.securityContext.runAsGroup
+          value: 70
+  - it: uses MariaDB for database.type mysql
+    template: database/statefulset.yaml
+    set:
+      database.type: mysql
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/mariadb:11.4.13
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 999
+      - notExists:
+          path: spec.template.spec.initContainers
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MARIADB_ROOT_HOST
+            value: localhost
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MARIADB_AUTO_UPGRADE
+            value: "1"
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: data
+            mountPath: /var/lib/mysql
+  - it: creates a PVC by default
+    template: database/statefulset.yaml
+    set:
+      database.embedded.persistence.size: 20Gi
+      database.embedded.persistence.storageClass: fast
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 20Gi
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+          value: fast
+  - it: uses an existing claim
+    template: database/statefulset.yaml
+    set:
+      database.embedded.persistence.existingClaim: my-pvc
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            persistentVolumeClaim:
+              claimName: my-pvc
+  - it: uses an emptyDir without persistence
+    template: database/statefulset.yaml
+    set:
+      database.embedded.persistence.enabled: false
+    asserts:
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            emptyDir: {}
+  - it: uses an existing database secret
+    template: database/statefulset.yaml
+    set:
+      database.embedded.existingSecret: my-db
+      database.embedded.secretKey: app
+      database.embedded.superuserSecretKey: root
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: my-db
+                key: root
+  - it: rejects identical secret keys
+    template: database/statefulset.yaml
+    set:
+      database.embedded.superuserSecretKey: password
+    asserts:
+      - failedTemplate:
+          errorPattern: must differ
+  - it: exposes the database port
+    template: database/service.yaml
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 5432
+  - it: exposes the MySQL port
+    template: database/service.yaml
+    set:
+      database.type: mysql
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 3306
+  - it: ships the PostgreSQL init scripts
+    template: database/configmap.yaml
+    asserts:
+      - exists:
+          path: data["create-app-user.sh"]
+      - exists:
+          path: data["version-check.sh"]
+  - it: renders nothing in external mode
+    values:
+      - values-external-pg.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: database/statefulset.yaml
+      - hasDocuments:
+          count: 0
+        template: database/service.yaml
+      - hasDocuments:
+          count: 0
+        template: database/configmap.yaml

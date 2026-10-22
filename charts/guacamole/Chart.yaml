@@ -1,0 +1,18 @@
+apiVersion: v2
+name: guacamole
+description: Apache Guacamole (webapp + guacd) with PostgreSQL or MySQL backend, built for GitOps.
+type: application
+version: 0.1.0
+appVersion: "1.6.0"
+kubeVersion: ">=1.29.0-0"
+home: https://guacamole.apache.org/
+icon: https://guacamole.apache.org/images/logos/guac-tricolor-logo.svg
+sources:
+  - https://github.com/apache/guacamole-client
+  - https://github.com/apache/guacamole-server
+keywords:
+  - guacamole
+  - remote-desktop
+  - rdp
+  - vnc
+  - ssh

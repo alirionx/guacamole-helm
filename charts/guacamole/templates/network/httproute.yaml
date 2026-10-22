@@ -1,0 +1,72 @@
+{{- if .Values.httpRoute.enabled }}
+{{- $route := .Values.httpRoute }}
+{{- if not $route.parentRefs }}
+{{- fail "httpRoute.parentRefs is required when httpRoute.enabled is true (the Gateway is managed outside of this chart)" }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "guacamole.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "guacamole") | nindent 4 }}
+    {{- with $route.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $route.parentRefs | nindent 4 }}
+  {{- with $route.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.guacamole.contextPath }}
+      backendRefs:
+        - name: {{ include "guacamole.fullname" . }}
+          port: {{ .Values.guacamole.service.port }}
+      {{- with $route.timeouts }}
+      timeouts:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if $route.httpsRedirect.enabled }}
+{{- if not $route.httpsRedirect.parentRefs }}
+{{- fail "httpRoute.httpsRedirect.parentRefs is required when httpRoute.httpsRedirect.enabled is true" }}
+{{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "guacamole.fullname" . }}-https-redirect
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "guacamole") | nindent 4 }}
+    {{- with $route.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $route.httpsRedirect.parentRefs | nindent 4 }}
+  {{- with $route.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+{{- end }}
+{{- end }}

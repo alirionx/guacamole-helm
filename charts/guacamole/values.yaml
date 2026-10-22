@@ -1,0 +1,510 @@
+# Default values for the guacamole chart.
+
+# -- Overrides the chart name used in resource names.
+nameOverride: ""
+# -- Overrides the full resource name prefix (default: `<release>-<chart>`).
+fullnameOverride: ""
+# -- Additional labels added to all resources.
+commonLabels: {}
+# -- Image pull secrets used by all pods (list of `{name: ...}`).
+imagePullSecrets: []
+
+serviceAccount:
+  # -- Create a dedicated ServiceAccount for the guacamole and guacd pods.
+  create: true
+  # -- Name of the ServiceAccount (default: fullname). Must exist if `create` is false.
+  name: ""
+  # -- Annotations for the ServiceAccount.
+  annotations: {}
+
+guacamole:
+  image:
+    # -- Image registry of the guacamole webapp.
+    registry: docker.io
+    # -- Image repository of the guacamole webapp.
+    repository: guacamole/guacamole
+    # -- Image tag (default: chart `appVersion`).
+    tag: ""
+    # -- Image digest (`sha256:...`); takes precedence over `tag`.
+    digest: ""
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+
+  # -- Number of webapp replicas. With more than one replica, sticky sessions are required (see README).
+  replicaCount: 1
+
+  # -- URL path under which Guacamole is served. Must start with `/`, e.g. `/` or `/guacamole`.
+  contextPath: /
+
+  # -- Webapp log level (`error`, `warn`, `info`, `debug`, `trace`).
+  logLevel: info
+
+  # -- Additional environment variables for the webapp container (list of EnvVar objects).
+  extraEnv: []
+
+  service:
+    # -- Service type (`ClusterIP`, `NodePort`, `LoadBalancer`).
+    type: ClusterIP
+    # -- Service port.
+    port: 80
+    # -- Fixed node port (only for `NodePort`/`LoadBalancer`).
+    nodePort: null
+    # -- Annotations for the Service. Use them to request a fixed load balancer IP, since
+    # `spec.loadBalancerIP` is deprecated, e.g. `metallb.io/loadBalancerIPs: "192.168.1.10"` (MetalLB)
+    # or `lbipam.cilium.io/ips: "192.168.1.10"` (Cilium).
+    annotations: {}
+    # -- Source CIDRs allowed to reach the load balancer (only for `LoadBalancer`).
+    loadBalancerSourceRanges: []
+    # -- Load balancer class (only for `LoadBalancer`).
+    loadBalancerClass: ""
+    # -- External traffic policy (`Cluster` or `Local`; only for `NodePort`/`LoadBalancer`).
+    externalTrafficPolicy: ""
+    # -- Session affinity (`None` or `ClientIP`). Use `ClientIP` for sticky sessions when exposing via LoadBalancer with more than one replica.
+    sessionAffinity: None
+
+  remoteIpValve:
+    # -- Enable Tomcat's RemoteIpValve, so that the client IP and protocol are taken from proxy headers
+    # (`X-Forwarded-For`, `X-Forwarded-Proto`). `null` enables it automatically when `ingress` or `httpRoute`
+    # is enabled. Keep it disabled when clients connect directly (e.g. LoadBalancer Service), otherwise
+    # they could spoof their IP address.
+    enabled: null
+    # -- Regular expression of proxy IPs whose headers are trusted (Tomcat `internalProxies`; empty: private
+    # IPv4/IPv6 ranges).
+    internalProxies: ""
+    # -- Regular expression of additional trusted proxies (Tomcat `trustedProxies`).
+    trustedProxies: ""
+    # -- Header holding the client IP (empty: `X-Forwarded-For`).
+    remoteIpHeader: ""
+    # -- Header holding the client protocol (empty: `X-Forwarded-Proto`).
+    protocolHeader: ""
+
+  # -- Liveness probe of the webapp container.
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  # -- Readiness probe of the webapp container.
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # -- Resource requests and limits of the webapp container.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  # -- Pod security context of the webapp pods (UID 1001 is the user of the official image).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container security context of the webapp container.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  # -- Additional pod annotations.
+  podAnnotations: {}
+  # -- Additional pod labels.
+  podLabels: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity rules.
+  affinity: {}
+  # -- Topology spread constraints.
+  topologySpreadConstraints: []
+
+ingress:
+  # -- Create an Ingress for the webapp.
+  enabled: false
+  # -- IngressClass name (empty: cluster default).
+  className: ""
+  # -- Annotations for the Ingress (e.g. cert-manager issuer, timeouts, sticky sessions; see README).
+  annotations: {}
+  # -- Additional labels for the Ingress.
+  labels: {}
+  # -- Hostnames routed to Guacamole. Without hosts the Ingress matches all hosts.
+  hosts: []
+  # -- Path type of the Ingress rule. The path is `guacamole.contextPath`.
+  pathType: Prefix
+  tls:
+    # -- Enable TLS for all `hosts`.
+    enabled: false
+    # -- Secret holding the TLS certificate (default: `<fullname>-tls`; may be created by cert-manager).
+    secretName: ""
+
+httpRoute:
+  # -- Create a Gateway API HTTPRoute for the webapp. The Gateway itself (listeners, TLS certificates)
+  # is managed outside of this chart.
+  enabled: false
+  # -- Annotations for the HTTPRoute.
+  annotations: {}
+  # -- Additional labels for the HTTPRoute.
+  labels: {}
+  # -- Gateways (and listeners via `sectionName`) the route attaches to, e.g.
+  # `[{name: gateway, namespace: gateway-system, sectionName: https}]`.
+  parentRefs: []
+  # -- Hostnames matched by the route. Without hostnames the listener's hostnames apply.
+  hostnames: []
+  # -- Timeouts of the route rule (Gateway API `HTTPRouteTimeouts`, e.g. `{request: 0s}`). Mind that
+  # Guacamole sessions are long-lived WebSocket connections.
+  timeouts: {}
+  httpsRedirect:
+    # -- Create a second HTTPRoute that redirects plain HTTP to HTTPS.
+    enabled: false
+    # -- Gateways (and plain HTTP listeners via `sectionName`) the redirect route attaches to.
+    parentRefs: []
+
+guacd:
+  image:
+    # -- Image registry of guacd.
+    registry: docker.io
+    # -- Image repository of guacd.
+    repository: guacamole/guacd
+    # -- Image tag (default: chart `appVersion`).
+    tag: ""
+    # -- Image digest (`sha256:...`); takes precedence over `tag`.
+    digest: ""
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+
+  # -- Number of guacd replicas.
+  replicaCount: 1
+
+  # -- guacd log level (`error`, `warning`, `info`, `debug`, `trace`).
+  logLevel: info
+
+  # -- Additional environment variables for the guacd container (list of EnvVar objects).
+  extraEnv: []
+
+  service:
+    # -- guacd service port.
+    port: 4822
+
+  # -- Liveness probe of the guacd container.
+  livenessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # -- Readiness probe of the guacd container.
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # -- Resource requests and limits of the guacd container.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+
+  # -- Pod security context of the guacd pods (UID 1000 is the user of the official image).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container security context of the guacd container.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  # -- Additional pod annotations.
+  podAnnotations: {}
+  # -- Additional pod labels.
+  podLabels: {}
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity rules.
+  affinity: {}
+  # -- Topology spread constraints.
+  topologySpreadConstraints: []
+
+database:
+  # -- Database type: `postgresql` or `mysql` (MySQL and MariaDB; the embedded mode uses MariaDB).
+  type: postgresql
+  # -- Operating mode: `embedded` (single replica database deployed by this chart) or `external`
+  # (existing database, e.g. CloudNativePG or a managed service).
+  mode: embedded
+
+  embedded:
+    # -- Name of the database created for Guacamole.
+    database: guacamole
+    # -- Application user owning the Guacamole database (used by the webapp and the schema job).
+    username: guacamole
+    # -- Existing Secret (type `Opaque`) holding the passwords of the embedded database. If empty,
+    # the secret init job creates the Secret `<fullname>-database` with random passwords.
+    existingSecret: ""
+    # -- Key within the database Secret holding the application user password.
+    secretKey: password
+    # -- Key within the database Secret holding the superuser password (`postgres` / MariaDB `root`).
+    superuserSecretKey: superuser-password
+
+    postgresql:
+      image:
+        # -- Registry of the embedded PostgreSQL image.
+        registry: docker.io
+        # -- Repository of the embedded PostgreSQL image.
+        repository: postgres
+        # -- Tag of the embedded PostgreSQL image. Only change the minor/patch version: a different
+        # major version cannot read the existing data (see README).
+        tag: "17.11-alpine"
+        # -- Digest of the embedded PostgreSQL image; takes precedence over `tag`.
+        digest: ""
+        # -- Pull policy of the embedded PostgreSQL image.
+        pullPolicy: IfNotPresent
+
+    mariadb:
+      image:
+        # -- Registry of the embedded MariaDB image.
+        registry: docker.io
+        # -- Repository of the embedded MariaDB image.
+        repository: mariadb
+        # -- Tag of the embedded MariaDB image (upgrades in place via `MARIADB_AUTO_UPGRADE`).
+        tag: "11.4.13"
+        # -- Digest of the embedded MariaDB image; takes precedence over `tag`.
+        digest: ""
+        # -- Pull policy of the embedded MariaDB image.
+        pullPolicy: IfNotPresent
+
+    persistence:
+      # -- Store data on a PersistentVolumeClaim. If false, an `emptyDir` is used and all data is lost
+      # when the pod is deleted (only for tests).
+      enabled: true
+      # -- Use an existing PersistentVolumeClaim instead of creating one.
+      existingClaim: ""
+      # -- StorageClass of the created PVC (empty: cluster default).
+      storageClass: ""
+      # -- Access modes of the created PVC.
+      accessModes: ["ReadWriteOnce"]
+      # -- Size of the created PVC.
+      size: 8Gi
+      # -- Annotations of the created PVC.
+      annotations: {}
+
+    # -- Size limit of the in-memory `/dev/shm` volume (PostgreSQL shared memory).
+    shmSizeLimit: 256Mi
+
+    # -- Additional environment variables for the database container (list of EnvVar objects).
+    extraEnv: []
+
+    # -- Resource requests and limits of the database container.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+    # -- Pod security context of the database pod. `runAsUser`, `runAsGroup` and `fsGroup` default to
+    # the user of the official image (PostgreSQL alpine: 70, MariaDB: 999) unless set here.
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    # -- Container security context of the database containers.
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+
+    # -- Additional pod annotations.
+    podAnnotations: {}
+    # -- Additional pod labels.
+    podLabels: {}
+    # -- Node selector.
+    nodeSelector: {}
+    # -- Tolerations.
+    tolerations: []
+    # -- Affinity rules.
+    affinity: {}
+
+  external:
+    # -- Hostname of the external database (required for `external`).
+    host: ""
+    # -- Port of the external database (default: 5432 for PostgreSQL, 3306 for MySQL).
+    port: null
+    # -- Database name.
+    database: guacamole
+    # -- Database user.
+    username: guacamole
+    # -- Name of an existing Secret (type `Opaque`) holding the database password (required for `external`).
+    existingSecret: ""
+    # -- Key within `existingSecret` holding the password.
+    secretKey: password
+
+auth:
+  # -- Extension load order (`EXTENSION_PRIORITY`), e.g. `openid` to redirect unauthenticated users to the
+  # identity provider immediately, or `*, openid` to show the Guacamole login screen with an SSO link.
+  extensionPriority: ""
+  # -- Create database accounts automatically for users authenticated by another extension (e.g. OIDC).
+  # Permissions and connections are still managed in the database.
+  autoCreateAccounts: false
+
+  oidc:
+    # -- Enable OpenID Connect single sign-on (implicit flow; no client secret required).
+    enabled: false
+    # -- Issuer expected in ID tokens (`issuer` of `/.well-known/openid-configuration`).
+    issuer: ""
+    # -- Authorization endpoint used by the browser (`authorization_endpoint` of the discovery document).
+    authorizationEndpoint: ""
+    # -- JWKS endpoint used by the Guacamole server to validate ID tokens (`jwks_uri`).
+    jwksEndpoint: ""
+    # -- Client ID registered at the identity provider.
+    clientId: ""
+    # -- URL the identity provider redirects back to: the full URL of Guacamole. Default: derived from the
+    # first Ingress host or HTTPRoute hostname and `guacamole.contextPath`.
+    redirectUri: ""
+    # -- Space-separated scopes (empty: `openid email profile`).
+    scope: ""
+    # -- Claim holding the username (empty: `email`).
+    usernameClaim: ""
+    # -- Claim holding the groups (empty: `groups`).
+    groupsClaim: ""
+    # -- Comma-separated claims exposed as `OIDC_*` attributes for connection parameters.
+    attributesClaims: ""
+    # -- Tolerated clock skew in seconds (empty: 30).
+    allowedClockSkew: null
+    # -- Maximum token validity in minutes (empty: 300).
+    maxTokenValidity: null
+    # -- Maximum nonce validity in minutes (empty: 10).
+    maxNonceValidity: null
+
+  totp:
+    # -- Enable TOTP as second factor (keys are stored in the database; SSO users need a database
+    # account, see `autoCreateAccounts`). Mutually exclusive with `duo`.
+    enabled: false
+    # -- Issuer shown in authenticator apps (empty: `Apache Guacamole`).
+    issuer: ""
+    # -- Number of digits per code (6, 7 or 8; empty: 6).
+    digits: null
+    # -- Validity of each code in seconds (empty: 30).
+    period: null
+    # -- Hash algorithm (`sha1`, `sha256`, `sha512`; empty: `sha1`).
+    mode: ""
+    # -- IPs/CIDRs that skip TOTP. Requires the correct client IP (see `guacamole.remoteIpValve`).
+    bypassHosts: []
+    # -- IPs/CIDRs that must use TOTP; all others skip it. Takes priority over `bypassHosts`.
+    enforceHosts: []
+
+  duo:
+    # -- Enable Duo (Universal Prompt) as second factor. Mutually exclusive with `totp`.
+    enabled: false
+    # -- Duo API hostname (`api-XXXXXXXX.duosecurity.com`).
+    apiHostname: ""
+    # -- Client ID of the Duo "Web SDK" application.
+    clientId: ""
+    # -- Existing Secret (type `Opaque`) holding the Duo client secret (required).
+    existingSecret: ""
+    # -- Key within `existingSecret` holding the client secret.
+    secretKey: client-secret
+    # -- URL Duo redirects back to (default: derived like `auth.oidc.redirectUri`).
+    redirectUri: ""
+    # -- Maximum time for a Duo authentication in minutes (empty: 5).
+    authTimeout: null
+    # -- IPs/CIDRs that skip Duo. Requires the correct client IP (see `guacamole.remoteIpValve`).
+    bypassHosts: []
+    # -- IPs/CIDRs that must use Duo; all others skip it. Takes priority over `bypassHosts`.
+    enforceHosts: []
+
+  admin:
+    # -- Existing Secret (type `Opaque`) holding the password for the initial `guacadmin` account.
+    # If empty, the secret init job creates the Secret `<fullname>-admin` with a random password.
+    existingSecret: ""
+    # -- Key within the admin Secret holding the password.
+    secretKey: password
+    # -- Set the `guacadmin` password from the Secret on every install/upgrade. If false, the password
+    # is only set on initial schema creation and while the default password `guacadmin` is still active.
+    enforcePassword: false
+
+initJobs:
+  # -- Number of retries before an init job is considered failed.
+  backoffLimit: 2
+  # -- Maximum runtime of an init job in seconds.
+  activeDeadlineSeconds: 600
+  # -- Seconds the schema job waits for the database to become reachable.
+  databaseWaitTimeout: 300
+  secrets:
+    # -- Annotations for the ServiceAccount of the secret init job.
+    serviceAccountAnnotations: {}
+  schema:
+    # -- Run the schema init job. Disable only if the schema and the admin password are managed outside the chart.
+    enabled: true
+    postgresqlClientImage:
+      # -- Registry of the image providing `psql` (version 15 or newer).
+      registry: docker.io
+      # -- Repository of the image providing `psql`.
+      repository: postgres
+      # -- Tag of the image providing `psql`.
+      tag: "17.11-alpine"
+      # -- Digest of the image providing `psql`; takes precedence over `tag`.
+      digest: ""
+      # -- Pull policy of the image providing `psql`.
+      pullPolicy: IfNotPresent
+    mysqlClientImage:
+      # -- Registry of the image providing the `mariadb` or `mysql` client. The MariaDB client works
+      # with MySQL and MariaDB servers.
+      registry: docker.io
+      # -- Repository of the image providing the `mariadb` or `mysql` client.
+      repository: mariadb
+      # -- Tag of the image providing the `mariadb` or `mysql` client.
+      tag: "11.4.13"
+      # -- Digest of the image providing the client; takes precedence over `tag`.
+      digest: ""
+      # -- Pull policy of the image providing the client.
+      pullPolicy: IfNotPresent
+  # -- Resource requests and limits of the init job containers.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  # -- Pod security context of the init jobs.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container security context of the init job containers.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  # -- Additional pod annotations of the init jobs.
+  podAnnotations: {}
+  # -- Additional pod labels of the init jobs.
+  podLabels: {}
+  # -- Node selector of the init jobs.
+  nodeSelector: {}
+  # -- Tolerations of the init jobs.
+  tolerations: []
+  # -- Affinity rules of the init jobs.
+  affinity: {}

@@ -1,0 +1,12 @@
+# Minimal setup: external PostgreSQL (e.g. CloudNativePG or a managed database).
+# Prerequisite (Opaque Secret with the database password):
+#   kubectl create secret generic guacamole-db --from-literal=password='...'
+database:
+  type: postgresql
+  mode: external
+  external:
+    host: postgres-rw.databases.svc
+    database: guacamole
+    username: guacamole
+    existingSecret: guacamole-db
+    secretKey: password

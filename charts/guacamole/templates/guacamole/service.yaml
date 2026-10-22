@@ -1,0 +1,38 @@
+{{- $svc := .Values.guacamole.service }}
+{{- $external := has $svc.type (list "NodePort" "LoadBalancer") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "guacamole.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "guacamole") | nindent 4 }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svc.type }}
+  {{- if and $external $svc.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ $svc.externalTrafficPolicy }}
+  {{- end }}
+  {{- if eq $svc.type "LoadBalancer" }}
+  {{- with $svc.loadBalancerClass }}
+  loadBalancerClass: {{ . }}
+  {{- end }}
+  {{- with $svc.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  sessionAffinity: {{ $svc.sessionAffinity }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and $external $svc.nodePort }}
+      nodePort: {{ $svc.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "guacamole") | nindent 4 }}

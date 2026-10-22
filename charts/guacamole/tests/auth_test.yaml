@@ -1,0 +1,266 @@
+suite: authentication (OIDC, TOTP, Duo)
+templates:
+  - guacamole/configmap.yaml
+  - guacamole/deployment.yaml
+  - secrets/job.yaml
+release:
+  name: test
+  namespace: guac
+tests:
+  - it: renders no auth variables by default
+    template: guacamole/configmap.yaml
+    asserts:
+      - notExists:
+          path: data.OPENID_ENABLED
+      - notExists:
+          path: data.TOTP_ENABLED
+      - notExists:
+          path: data.DUO_ENABLED
+      - notExists:
+          path: data.EXTENSION_PRIORITY
+  - it: sets extension priority and auto-created accounts
+    template: guacamole/configmap.yaml
+    set:
+      auth.extensionPriority: "*, openid"
+      auth.autoCreateAccounts: true
+    asserts:
+      - equal:
+          path: data.EXTENSION_PRIORITY
+          value: "*, openid"
+      - equal:
+          path: data.POSTGRESQL_AUTO_CREATE_ACCOUNTS
+          value: "true"
+  - it: uses the MySQL prefix for auto-created accounts
+    template: guacamole/configmap.yaml
+    set:
+      database.type: mysql
+      auth.autoCreateAccounts: true
+    asserts:
+      - equal:
+          path: data.MYSQL_AUTO_CREATE_ACCOUNTS
+          value: "true"
+  - it: maps OIDC settings
+    template: guacamole/configmap.yaml
+    set:
+      auth.oidc.enabled: true
+      auth.oidc.issuer: https://idp.example.com
+      auth.oidc.authorizationEndpoint: https://idp.example.com/auth
+      auth.oidc.jwksEndpoint: https://idp.example.com/keys
+      auth.oidc.clientId: guacamole
+      auth.oidc.redirectUri: https://guac.example.com/
+      auth.oidc.scope: openid email profile groups
+      auth.oidc.usernameClaim: preferred_username
+      auth.oidc.groupsClaim: roles
+      auth.oidc.attributesClaims: department,team
+      auth.oidc.allowedClockSkew: 60
+      auth.oidc.maxTokenValidity: 1440
+      auth.oidc.maxNonceValidity: 20
+    asserts:
+      - equal:
+          path: data.OPENID_ENABLED
+          value: "true"
+      - equal:
+          path: data.OPENID_ISSUER
+          value: https://idp.example.com
+      - equal:
+          path: data.OPENID_AUTHORIZATION_ENDPOINT
+          value: https://idp.example.com/auth
+      - equal:
+          path: data.OPENID_JWKS_ENDPOINT
+          value: https://idp.example.com/keys
+      - equal:
+          path: data.OPENID_CLIENT_ID
+          value: guacamole
+      - equal:
+          path: data.OPENID_REDIRECT_URI
+          value: https://guac.example.com/
+      - equal:
+          path: data.OPENID_SCOPE
+          value: openid email profile groups
+      - equal:
+          path: data.OPENID_USERNAME_CLAIM_TYPE
+          value: preferred_username
+      - equal:
+          path: data.OPENID_GROUPS_CLAIM_TYPE
+          value: roles
+      - equal:
+          path: data.OPENID_ATTRIBUTES_CLAIM_TYPE
+          value: department,team
+      - equal:
+          path: data.OPENID_ALLOWED_CLOCK_SKEW
+          value: "60"
+      - equal:
+          path: data.OPENID_MAX_TOKEN_VALIDITY
+          value: "1440"
+      - equal:
+          path: data.OPENID_MAX_NONCE_VALIDITY
+          value: "20"
+  - it: omits optional OIDC settings
+    template: guacamole/configmap.yaml
+    set:
+      auth.oidc.enabled: true
+      auth.oidc.issuer: https://idp
+      auth.oidc.authorizationEndpoint: https://idp/auth
+      auth.oidc.jwksEndpoint: https://idp/keys
+      auth.oidc.clientId: guacamole
+      auth.oidc.redirectUri: https://guac/
+    asserts:
+      - notExists:
+          path: data.OPENID_SCOPE
+      - notExists:
+          path: data.OPENID_MAX_TOKEN_VALIDITY
+  - it: derives the redirect URI from the Ingress host
+    template: guacamole/configmap.yaml
+    set:
+      auth.oidc.enabled: true
+      auth.oidc.issuer: https://idp
+      auth.oidc.authorizationEndpoint: https://idp/auth
+      auth.oidc.jwksEndpoint: https://idp/keys
+      auth.oidc.clientId: guacamole
+      ingress.enabled: true
+      ingress.hosts: [guac.example.com]
+      ingress.tls.enabled: true
+      guacamole.contextPath: /guacamole
+    asserts:
+      - equal:
+          path: data.OPENID_REDIRECT_URI
+          value: https://guac.example.com/guacamole
+  - it: derives the redirect URI from the HTTPRoute hostname
+    template: guacamole/configmap.yaml
+    set:
+      auth.oidc.enabled: true
+      auth.oidc.issuer: https://idp
+      auth.oidc.authorizationEndpoint: https://idp/auth
+      auth.oidc.jwksEndpoint: https://idp/keys
+      auth.oidc.clientId: guacamole
+      httpRoute.enabled: true
+      httpRoute.parentRefs: [{name: gw}]
+      httpRoute.hostnames: [guac.example.org]
+    asserts:
+      - equal:
+          path: data.OPENID_REDIRECT_URI
+          value: https://guac.example.org/
+  - it: requires a redirect URI if it cannot be derived
+    template: guacamole/deployment.yaml
+    set:
+      auth.oidc.enabled: true
+      auth.oidc.issuer: https://idp
+      auth.oidc.authorizationEndpoint: https://idp/auth
+      auth.oidc.jwksEndpoint: https://idp/keys
+      auth.oidc.clientId: guacamole
+    asserts:
+      - failedTemplate:
+          errorPattern: auth.oidc.redirectUri is required
+  - it: requires the OIDC endpoints
+    template: guacamole/deployment.yaml
+    set:
+      auth.oidc.enabled: true
+      auth.oidc.issuer: https://idp
+    asserts:
+      - failedTemplate:
+          errorPattern: auth.oidc.authorizationEndpoint is required
+  - it: maps TOTP settings
+    template: guacamole/configmap.yaml
+    set:
+      auth.totp.enabled: true
+      auth.totp.issuer: Example
+      auth.totp.digits: 8
+      auth.totp.period: 60
+      auth.totp.mode: sha256
+      auth.totp.bypassHosts: [10.0.0.0/8, 192.168.1.10]
+      auth.totp.enforceHosts: [0.0.0.0/0]
+    asserts:
+      - equal:
+          path: data.TOTP_ENABLED
+          value: "true"
+      - equal:
+          path: data.TOTP_ISSUER
+          value: Example
+      - equal:
+          path: data.TOTP_DIGITS
+          value: "8"
+      - equal:
+          path: data.TOTP_PERIOD
+          value: "60"
+      - equal:
+          path: data.TOTP_MODE
+          value: sha256
+      - equal:
+          path: data.TOTP_BYPASS_HOSTS
+          value: 10.0.0.0/8,192.168.1.10
+      - equal:
+          path: data.TOTP_ENFORCE_HOSTS
+          value: 0.0.0.0/0
+  - it: maps Duo settings and passes the client secret via secretKeyRef
+    set:
+      auth.duo.enabled: true
+      auth.duo.apiHostname: api-x.duosecurity.com
+      auth.duo.clientId: DIXXX
+      auth.duo.existingSecret: duo
+      auth.duo.redirectUri: https://guac.example.com/
+      auth.duo.authTimeout: 10
+      auth.duo.enforceHosts: [0.0.0.0/0]
+    asserts:
+      - equal:
+          path: data.DUO_API_HOSTNAME
+          value: api-x.duosecurity.com
+        template: guacamole/configmap.yaml
+      - equal:
+          path: data.DUO_CLIENT_ID
+          value: DIXXX
+        template: guacamole/configmap.yaml
+      - equal:
+          path: data.DUO_REDIRECT_URI
+          value: https://guac.example.com/
+        template: guacamole/configmap.yaml
+      - equal:
+          path: data.DUO_AUTH_TIMEOUT
+          value: "10"
+        template: guacamole/configmap.yaml
+      - equal:
+          path: data.DUO_ENFORCE_HOSTS
+          value: 0.0.0.0/0
+        template: guacamole/configmap.yaml
+      - notExists:
+          path: data.DUO_CLIENT_SECRET
+        template: guacamole/configmap.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DUO_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: duo
+                key: client-secret
+        template: guacamole/deployment.yaml
+  - it: lets the secret init job check the Duo secret
+    template: secrets/job.yaml
+    set:
+      auth.duo.enabled: true
+      auth.duo.apiHostname: api-x.duosecurity.com
+      auth.duo.clientId: DIXXX
+      auth.duo.existingSecret: duo
+      auth.duo.redirectUri: https://guac.example.com/
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: EXISTING_SECRETS
+            value: duo:client-secret
+  - it: requires the Duo client secret
+    template: guacamole/deployment.yaml
+    set:
+      auth.duo.enabled: true
+      auth.duo.apiHostname: api-x.duosecurity.com
+      auth.duo.clientId: DIXXX
+    asserts:
+      - failedTemplate:
+          errorPattern: auth.duo.existingSecret is required
+  - it: rejects TOTP together with Duo
+    template: guacamole/deployment.yaml
+    set:
+      auth.totp.enabled: true
+      auth.duo.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: auth.totp and auth.duo are mutually exclusive

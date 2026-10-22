@@ -1,0 +1,10 @@
+# Embedded PostgreSQL (default mode). No prerequisites: database, passwords, schema and the
+# guacadmin password are created automatically. Single replica, no backups: HA and disaster
+# recovery are up to you (or use an external database).
+database:
+  type: postgresql
+  mode: embedded
+  embedded:
+    persistence:
+      size: 10Gi
+      # storageClass: fast-ssd

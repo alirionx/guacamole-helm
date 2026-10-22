@@ -1,0 +1,28 @@
+# Single sign-on with Keycloak plus TOTP as second factor for local database users.
+# Keycloak client: OpenID Connect, client authentication off, "Implicit flow" enabled,
+# valid redirect URI https://guacamole.example.com/ and a "Group Membership" mapper
+# (token claim name "groups", full group path off, add to ID token).
+ingress:
+  enabled: true
+  className: traefik
+  hosts: [guacamole.example.com]
+  tls:
+    enabled: true
+auth:
+  # show the Guacamole login screen with a "Sign in with OpenID" link
+  extensionPriority: "*, openid"
+  # create database accounts for SSO users (needed to store their TOTP keys and permissions)
+  autoCreateAccounts: true
+  oidc:
+    enabled: true
+    issuer: https://keycloak.example.com/realms/example
+    authorizationEndpoint: https://keycloak.example.com/realms/example/protocol/openid-connect/auth
+    jwksEndpoint: https://keycloak.example.com/realms/example/protocol/openid-connect/certs
+    clientId: guacamole
+    # redirectUri is derived from the Ingress host: https://guacamole.example.com/
+    scope: openid email profile
+    usernameClaim: preferred_username
+    groupsClaim: groups
+  totp:
+    enabled: true
+    issuer: Guacamole Example

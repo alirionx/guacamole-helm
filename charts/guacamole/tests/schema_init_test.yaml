@@ -1,0 +1,122 @@
+suite: schema init job
+templates:
+  - database/schema-job.yaml
+values:
+  - values-external-pg.yaml
+release:
+  name: test
+  namespace: guac
+tests:
+  - it: runs as post-install/post-upgrade hook and Argo CD PostSync hook
+    asserts:
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: post-install,post-upgrade
+      - equal:
+          path: metadata.annotations["argocd.argoproj.io/hook"]
+          value: PostSync
+  - it: generates the schema from the guacamole image
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: docker.io/guacamole/guacamole:1.6.0
+      - equal:
+          path: spec.template.spec.initContainers[0].command[2]
+          value: /opt/guacamole/bin/initdb.sh --postgresql > /work/schema.sql
+  - it: uses the psql client image and passes credentials via secretKeyRef
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/postgres:17.11-alpine
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-secret
+                key: password
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: test-guacamole-admin
+                key: password
+  - it: uses a user-provided admin secret
+    set:
+      auth.admin.existingSecret: my-admin
+      auth.admin.secretKey: pw
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: my-admin
+                key: pw
+  - it: passes enforcePassword and the wait timeout
+    set:
+      auth.admin.enforcePassword: true
+      initJobs.databaseWaitTimeout: 60
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ENFORCE_PASSWORD
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: WAIT_TIMEOUT
+            value: "60"
+  - it: does not mount a ServiceAccount token
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+  - it: can be disabled
+    set:
+      initJobs.schema.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: uses the MariaDB client image and DB_* variables for MySQL
+    set:
+      database.type: mysql
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].command[2]
+          value: /opt/guacamole/bin/initdb.sh --mysql > /work/schema.sql
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/mariadb:11.4.13
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_PORT
+            value: "3306"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-secret
+                key: password
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PGHOST
+            value: pg.example.svc
+  - it: allows a custom MySQL client image
+    set:
+      database.type: mysql
+      initJobs.schema.mysqlClientImage.repository: library/mysql
+      initJobs.schema.mysqlClientImage.tag: "8.4"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/library/mysql:8.4

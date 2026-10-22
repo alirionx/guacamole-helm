@@ -1,0 +1,83 @@
+{{- $component := "guacd" }}
+{{- $values := .Values.guacd }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "guacamole.componentName" (dict "context" . "component" $component) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ $values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      {{- with $values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "guacamole.componentLabels" (dict "context" . "component" $component) | nindent 8 }}
+        {{- with $values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "guacamole.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: guacd
+          image: {{ include "guacamole.image" (dict "image" $values.image "context" .) | quote }}
+          imagePullPolicy: {{ $values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $values.securityContext | nindent 12 }}
+          ports:
+            - name: guacd
+              containerPort: 4822
+              protocol: TCP
+          env:
+            - name: LOG_LEVEL
+              value: {{ $values.logLevel | quote }}
+            {{- with $values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            tcpSocket:
+              port: guacd
+            {{- toYaml $values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: guacd
+            {{- toYaml $values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with $values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

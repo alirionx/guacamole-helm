@@ -1,0 +1,12 @@
+{{- if and (include "guacamole.database.embedded" .) (eq .Values.database.type "postgresql") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "guacamole.database.embeddedName" . }}-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "database") | nindent 4 }}
+data:
+  create-app-user.sh: {{ .Files.Get "files/postgresql-create-app-user.sh" | quote }}
+  version-check.sh: {{ .Files.Get "files/postgresql-version-check.sh" | quote }}
+{{- end }}

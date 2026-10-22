@@ -1,0 +1,229 @@
+{{- if include "guacamole.database.embedded" . }}
+{{- include "guacamole.database.validate" . }}
+{{- $values := .Values.database.embedded }}
+{{- $mysql := eq .Values.database.type "mysql" }}
+{{- $name := include "guacamole.database.embeddedName" . }}
+{{- $secretName := include "guacamole.database.secretName" . }}
+{{- $persistence := $values.persistence }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "database") | nindent 4 }}
+spec:
+  # Single replica by design: HA and disaster recovery are out of scope of the embedded mode.
+  replicas: 1
+  serviceName: {{ $name }}
+  # With OrderedReady a pod that never becomes ready (e.g. failed version check) blocks the
+  # rollout of a fixed spec; Parallel lets the controller replace it.
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "database") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if not $mysql }}
+        checksum/init: {{ include (print $.Template.BasePath "/database/configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with $values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "guacamole.componentLabels" (dict "context" . "component" "database") | nindent 8 }}
+        {{- with $values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "guacamole.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "guacamole.database.podSecurityContext" . | nindent 8 }}
+      {{- if not $mysql }}
+      initContainers:
+        - name: version-check
+          image: {{ include "guacamole.database.embeddedImage" . | quote }}
+          imagePullPolicy: {{ $values.postgresql.image.pullPolicy }}
+          command: ["/bin/sh", "/init/version-check.sh"]
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            {{- toYaml $values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /init
+      {{- end }}
+      containers:
+        - name: database
+          image: {{ include "guacamole.database.embeddedImage" . | quote }}
+          imagePullPolicy: {{ ternary $values.mariadb.image.pullPolicy $values.postgresql.image.pullPolicy $mysql }}
+          securityContext:
+            {{- toYaml $values.securityContext | nindent 12 }}
+          ports:
+            - name: database
+              containerPort: {{ include "guacamole.database.defaultPort" . }}
+              protocol: TCP
+          env:
+            {{- if $mysql }}
+            - name: MARIADB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $values.superuserSecretKey }}
+            # root may only log in from inside the pod.
+            - name: MARIADB_ROOT_HOST
+              value: localhost
+            - name: MARIADB_DATABASE
+              value: {{ $values.database | quote }}
+            - name: MARIADB_USER
+              value: {{ $values.username | quote }}
+            - name: MARIADB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $values.secretKey }}
+            - name: MARIADB_AUTO_UPGRADE
+              value: "1"
+            {{- else }}
+            # Subdirectory, so that a lost+found directory on the volume does not break initdb.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $values.superuserSecretKey }}
+            - name: APP_DATABASE
+              value: {{ $values.database | quote }}
+            - name: APP_USER
+              value: {{ $values.username | quote }}
+            - name: APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $values.secretKey }}
+            {{- end }}
+            {{- with $values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $mysql }}
+          startupProbe:
+            exec:
+              command: ["healthcheck.sh", "--connect"]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["healthcheck.sh", "--connect"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["healthcheck.sh", "--connect"]
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          {{- else }}
+          # TCP on 127.0.0.1 only succeeds once the final server runs (not the initdb server).
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          {{- end }}
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ ternary "/var/lib/mysql" "/var/lib/postgresql/data" $mysql }}
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: {{ ternary "/run/mysqld" "/var/run/postgresql" $mysql }}
+            {{- if not $mysql }}
+            - name: shm
+              mountPath: /dev/shm
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d/create-app-user.sh
+              subPath: create-app-user.sh
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        {{- if not $mysql }}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $values.shmSizeLimit }}
+        - name: init
+          configMap:
+            name: {{ $name }}-init
+        {{- end }}
+        {{- if not $persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- else if $persistence.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $persistence.existingClaim }}
+        {{- end }}
+      {{- with $values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if and $persistence.enabled (not $persistence.existingClaim) }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "database") | nindent 10 }}
+        {{- with $persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml $persistence.accessModes | nindent 10 }}
+        {{- with $persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $persistence.size }}
+  {{- end }}
+{{- end }}

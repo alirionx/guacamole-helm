@@ -1,0 +1,205 @@
+suite: exposure (Ingress, HTTPRoute, RemoteIpValve)
+templates:
+  - network/ingress.yaml
+  - network/httproute.yaml
+  - guacamole/configmap.yaml
+release:
+  name: test
+  namespace: guac
+tests:
+  - it: renders no Ingress or HTTPRoute by default
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: network/ingress.yaml
+      - hasDocuments:
+          count: 0
+        template: network/httproute.yaml
+  - it: creates an Ingress for the given hosts and context path
+    template: network/ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.className: traefik
+      ingress.hosts: [a.example.com, b.example.com]
+      guacamole.contextPath: /guacamole
+    asserts:
+      - equal:
+          path: spec.ingressClassName
+          value: traefik
+      - equal:
+          path: spec.rules[1].host
+          value: b.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /guacamole
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service
+          value:
+            name: test-guacamole
+            port:
+              name: http
+      - notExists:
+          path: spec.tls
+  - it: matches all hosts without hosts
+    template: network/ingress.yaml
+    set:
+      ingress.enabled: true
+    asserts:
+      - notExists:
+          path: spec.rules[0].host
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /
+  - it: enables TLS with the default secret name
+    template: network/ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.hosts: [a.example.com]
+      ingress.tls.enabled: true
+      ingress.annotations:
+        cert-manager.io/cluster-issuer: letsencrypt
+    asserts:
+      - equal:
+          path: spec.tls
+          value:
+            - secretName: test-guacamole-tls
+              hosts: [a.example.com]
+      - equal:
+          path: metadata.annotations["cert-manager.io/cluster-issuer"]
+          value: letsencrypt
+  - it: uses a custom TLS secret
+    template: network/ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.tls.enabled: true
+      ingress.tls.secretName: my-cert
+    asserts:
+      - equal:
+          path: spec.tls[0].secretName
+          value: my-cert
+  - it: creates an HTTPRoute attached to an external Gateway
+    template: network/httproute.yaml
+    set:
+      httpRoute.enabled: true
+      httpRoute.parentRefs:
+        - name: gw
+          namespace: gateway-system
+          sectionName: https
+      httpRoute.hostnames: [guac.example.com]
+      httpRoute.timeouts:
+        request: 0s
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.parentRefs[0]
+          value:
+            name: gw
+            namespace: gateway-system
+            sectionName: https
+      - equal:
+          path: spec.rules[0].matches[0].path
+          value:
+            type: PathPrefix
+            value: /
+      - equal:
+          path: spec.rules[0].backendRefs[0]
+          value:
+            name: test-guacamole
+            port: 80
+      - equal:
+          path: spec.rules[0].timeouts.request
+          value: 0s
+  - it: requires parentRefs for the HTTPRoute
+    template: network/httproute.yaml
+    set:
+      httpRoute.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: httpRoute.parentRefs is required
+  - it: adds an HTTP to HTTPS redirect route
+    template: network/httproute.yaml
+    set:
+      httpRoute.enabled: true
+      httpRoute.parentRefs: [{name: gw, sectionName: https}]
+      httpRoute.httpsRedirect.enabled: true
+      httpRoute.httpsRedirect.parentRefs: [{name: gw, sectionName: http}]
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: metadata.name
+          value: test-guacamole-https-redirect
+        documentIndex: 1
+      - equal:
+          path: spec.parentRefs[0].sectionName
+          value: http
+        documentIndex: 1
+      - equal:
+          path: spec.rules[0].filters[0]
+          value:
+            type: RequestRedirect
+            requestRedirect:
+              scheme: https
+              statusCode: 301
+        documentIndex: 1
+  - it: requires parentRefs for the redirect route
+    template: network/httproute.yaml
+    set:
+      httpRoute.enabled: true
+      httpRoute.parentRefs: [{name: gw}]
+      httpRoute.httpsRedirect.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: httpRoute.httpsRedirect.parentRefs is required
+  - it: keeps the RemoteIpValve off without Ingress or HTTPRoute
+    template: guacamole/configmap.yaml
+    asserts:
+      - notExists:
+          path: data.REMOTE_IP_VALVE_ENABLED
+  - it: enables the RemoteIpValve automatically with an Ingress
+    template: guacamole/configmap.yaml
+    set:
+      ingress.enabled: true
+    asserts:
+      - equal:
+          path: data.REMOTE_IP_VALVE_ENABLED
+          value: "true"
+  - it: enables the RemoteIpValve automatically with an HTTPRoute
+    template: guacamole/configmap.yaml
+    set:
+      httpRoute.enabled: true
+      httpRoute.parentRefs: [{name: gw}]
+    asserts:
+      - equal:
+          path: data.REMOTE_IP_VALVE_ENABLED
+          value: "true"
+  - it: allows disabling the RemoteIpValve explicitly
+    template: guacamole/configmap.yaml
+    set:
+      ingress.enabled: true
+      guacamole.remoteIpValve.enabled: false
+    asserts:
+      - notExists:
+          path: data.REMOTE_IP_VALVE_ENABLED
+  - it: passes RemoteIpValve options
+    template: guacamole/configmap.yaml
+    set:
+      guacamole.remoteIpValve.enabled: true
+      guacamole.remoteIpValve.internalProxies: '10\.0\.0\.\d+'
+      guacamole.remoteIpValve.trustedProxies: '192\.168\.1\.1'
+      guacamole.remoteIpValve.remoteIpHeader: X-Real-IP
+      guacamole.remoteIpValve.protocolHeader: X-Forwarded-Scheme
+    asserts:
+      - equal:
+          path: data.REMOTE_IP_VALVE_INTERNAL_PROXIES
+          value: '10\.0\.0\.\d+'
+      - equal:
+          path: data.REMOTE_IP_VALVE_TRUSTED_PROXIES
+          value: '192\.168\.1\.1'
+      - equal:
+          path: data.REMOTE_IP_VALVE_REMOTE_IP_HEADER
+          value: X-Real-IP
+      - equal:
+          path: data.REMOTE_IP_VALVE_PROTOCOL_HEADER
+          value: X-Forwarded-Scheme

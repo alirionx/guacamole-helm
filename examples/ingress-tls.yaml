@@ -1,0 +1,19 @@
+# Ingress (Traefik) with TLS (certificate issued by cert-manager) and sticky sessions for two
+# replicas. Traefik supports the WebSocket tunnel without further configuration.
+guacamole:
+  replicaCount: 2
+  service:
+    annotations:
+      # sticky sessions (required with more than one replica)
+      traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+      traefik.ingress.kubernetes.io/service.sticky.cookie.name: GUACAMOLE_ROUTE
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - guacamole.example.com
+  tls:
+    enabled: true
+    secretName: guacamole-tls

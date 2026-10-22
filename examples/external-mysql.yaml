@@ -1,0 +1,13 @@
+# External MySQL or MariaDB database.
+# Prerequisite (Opaque Secret with the database password):
+#   kubectl create secret generic guacamole-db --from-literal=password='...'
+database:
+  type: mysql
+  mode: external
+  external:
+    host: mariadb.databases.svc
+    port: 3306
+    database: guacamole
+    username: guacamole
+    existingSecret: guacamole-db
+    secretKey: password

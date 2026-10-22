@@ -1,0 +1,37 @@
+{{- include "guacamole.database.validate" . }}
+{{- $prefix := include "guacamole.database.envPrefix" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "guacamole.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "guacamole") | nindent 4 }}
+data:
+  WEBAPP_CONTEXT: {{ include "guacamole.webappContext" . | quote }}
+  LOG_LEVEL: {{ .Values.guacamole.logLevel | quote }}
+  GUACD_HOSTNAME: {{ include "guacamole.componentName" (dict "context" . "component" "guacd") | quote }}
+  GUACD_PORT: {{ .Values.guacd.service.port | quote }}
+  {{ $prefix }}_HOSTNAME: {{ include "guacamole.database.host" . | quote }}
+  {{ $prefix }}_PORT: {{ include "guacamole.database.port" . | quote }}
+  {{ $prefix }}_DATABASE: {{ include "guacamole.database.name" . | quote }}
+  {{ $prefix }}_USERNAME: {{ include "guacamole.database.username" . | quote }}
+  {{- with include "guacamole.auth.env" . | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  {{- if include "guacamole.remoteIpValve.enabled" . }}
+  {{- $valve := .Values.guacamole.remoteIpValve }}
+  REMOTE_IP_VALVE_ENABLED: "true"
+  {{- with $valve.internalProxies }}
+  REMOTE_IP_VALVE_INTERNAL_PROXIES: {{ . | quote }}
+  {{- end }}
+  {{- with $valve.trustedProxies }}
+  REMOTE_IP_VALVE_TRUSTED_PROXIES: {{ . | quote }}
+  {{- end }}
+  {{- with $valve.remoteIpHeader }}
+  REMOTE_IP_VALVE_REMOTE_IP_HEADER: {{ . | quote }}
+  {{- end }}
+  {{- with $valve.protocolHeader }}
+  REMOTE_IP_VALVE_PROTOCOL_HEADER: {{ . | quote }}
+  {{- end }}
+  {{- end }}
