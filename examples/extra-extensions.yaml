@@ -1,0 +1,18 @@
+# Additional (non-official) extensions and guacamole.properties entries.
+# Official extensions (OIDC, TOTP, Duo, ...) are already in the image: enable them via auth.*.
+guacamole:
+  extraProperties:
+    api-session-timeout: "120"
+  extraExtensions:
+    # recommended: init container copies the JARs from an image (see extension-image/Dockerfile)
+    - name: my-extension
+      image:
+        registry: ghcr.io
+        repository: example/guacamole-my-extension
+        tag: "1.0.0"
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+    # download with mandatory SHA-256 checksum
+    - name: branding
+      url: https://downloads.example.com/guacamole-branding-1.0.0.jar
+      sha256: 0f343b0931126a20f133d67c2b018a3b1e2a6b0f1b1f4bf2b5ff9f1a7c0e7d11

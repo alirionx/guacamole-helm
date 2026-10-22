@@ -1,0 +1,140 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- include "guacamole.database.validate" . }}
+{{- $np := .Values.networkPolicy }}
+{{- $embedded := include "guacamole.database.embedded" . }}
+{{- $dbPort := include "guacamole.database.port" . | int }}
+# Webapp: reachable on its HTTP port, talks to guacd, the database and DNS only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "guacamole.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "guacamole") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "guacamole") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+      {{- with $np.guacamole.from }}
+      from:
+        {{- toYaml . | nindent 8 }}
+        # Helm test pod of this release
+        - podSelector:
+            matchLabels:
+              {{- include "guacamole.componentSelectorLabels" (dict "context" $ "component" "test") | nindent 14 }}
+      {{- end }}
+  egress:
+    {{- include "guacamole.np.dnsRule" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "guacd") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 4822
+    {{- include "guacamole.np.databaseRule" . | nindent 4 }}
+    {{- with $np.guacamole.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+# guacd: only reachable from the webapp; connects to the remote desktop targets.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "guacamole.componentName" (dict "context" . "component" "guacd") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "guacd") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "guacd") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "guacamole") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 4822
+  egress:
+    {{- include "guacamole.np.dnsRule" . | nindent 4 }}
+    {{- with $np.guacd.egressTo }}
+    {{- toYaml . | nindent 4 }}
+    {{- else }}
+    - {}
+    {{- end }}
+---
+# Schema init job: talks to the database and DNS only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "guacamole.componentName" (dict "context" . "component" "schema-init") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "schema-init") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "schema-init") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- include "guacamole.np.dnsRule" . | nindent 4 }}
+    {{- include "guacamole.np.databaseRule" . | nindent 4 }}
+---
+# Secret init job: talks to the Kubernetes API and DNS only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "guacamole.componentName" (dict "context" . "component" "secrets-init") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "secrets-init") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "secrets-init") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- include "guacamole.np.dnsRule" . | nindent 4 }}
+    - to:
+        {{- toYaml $np.kubeApiServer | nindent 8 }}
+      ports:
+        {{- range $np.kubeApiServerPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- if $embedded }}
+---
+# Embedded database: only reachable from the webapp and the schema job; no egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "guacamole.database.embeddedName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "database") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "database") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "guacamole") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" "schema-init") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $dbPort }}
+{{- end }}
+{{- end }}

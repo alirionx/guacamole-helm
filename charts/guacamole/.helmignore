@@ -8,5 +8,8 @@
 *~
 .idea/
 .vscode/
-tests/
+tests/*_test.yaml
+tests/values-*.yaml
+tests/__snapshot__/
 README.md.gotmpl
+ci/

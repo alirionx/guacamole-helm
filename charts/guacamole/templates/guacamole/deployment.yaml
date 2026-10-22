@@ -1,4 +1,5 @@
 {{- include "guacamole.database.validate" . }}
+{{- include "guacamole.extensions.validate" . }}
 {{- $component := "guacamole" }}
 {{- $values := .Values.guacamole }}
 apiVersion: apps/v1
@@ -9,7 +10,9 @@ metadata:
   labels:
     {{- include "guacamole.componentLabels" (dict "context" . "component" $component) | nindent 4 }}
 spec:
+  {{- if not $values.autoscaling.enabled }}
   replicas: {{ $values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "guacamole.componentSelectorLabels" (dict "context" . "component" $component) | nindent 6 }}
@@ -17,6 +20,9 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/guacamole/configmap.yaml") . | sha256sum }}
+        {{- if $values.extraProperties }}
+        checksum/properties: {{ include (print $.Template.BasePath "/guacamole/properties.yaml") . | sha256sum }}
+        {{- end }}
         {{- with $values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -31,12 +37,16 @@ spec:
       # The entrypoint of the official image enables extensions based on environment variable
       # prefixes (e.g. MYSQL_*). Kubernetes service links would inject such variables.
       enableServiceLinks: false
-      {{- with .Values.imagePullSecrets }}
+      {{- with include "guacamole.extensions.pullSecrets" . }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       securityContext:
         {{- toYaml $values.podSecurityContext | nindent 8 }}
+      {{- with include "guacamole.extensions.initContainers" . }}
+      initContainers:
+        {{- . | nindent 8 }}
+      {{- end }}
       containers:
         - name: guacamole
           image: {{ include "guacamole.image" (dict "image" $values.image "context" .) | quote }}
@@ -79,12 +89,49 @@ spec:
           resources:
             {{- toYaml $values.resources | nindent 12 }}
           volumeMounts:
-            # The entrypoint generates GUACAMOLE_HOME and CATALINA_BASE below /tmp.
+            # The entrypoint generates GUACAMOLE_HOME and CATALINA_BASE below /tmp. /etc/guacamole is
+            # only used as template: its extensions and guacamole.properties are added to the generated
+            # home, next to the official extensions enabled via environment variables.
             - name: tmp
               mountPath: /tmp
+            {{- if $values.extraExtensions }}
+            {{- $first := first $values.extraExtensions }}
+            {{- if $first.imageVolume }}
+            # Image volume: the directory with the JARs is mounted directly, no init container
+            # (container runtimes only support directories as image volume subPath).
+            - name: extensions
+              mountPath: /etc/guacamole/extensions
+              subPath: {{ $first.imageVolume.path | default "extensions" }}
+              readOnly: true
+            {{- else }}
+            - name: extensions
+              mountPath: /etc/guacamole/extensions
+            {{- end }}
+            {{- end }}
+            {{- if $values.extraProperties }}
+            - name: properties
+              mountPath: /etc/guacamole/guacamole.properties
+              subPath: guacamole.properties
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if $values.extraExtensions }}
+        {{- with (first $values.extraExtensions).imageVolume }}
+        - name: extensions
+          image:
+            reference: {{ .reference | quote }}
+            pullPolicy: {{ .pullPolicy | default "IfNotPresent" }}
+        {{- else }}
+        - name: extensions
+          emptyDir: {}
+        {{- end }}
+        {{- end }}
+        {{- if $values.extraProperties }}
+        - name: properties
+          configMap:
+            name: {{ include "guacamole.fullname" . }}-properties
+        {{- end }}
       {{- with $values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -1,0 +1,97 @@
+# Release: a tag vX.Y.Z pushes the Helm chart as OCI artifact to ghcr.io/<owner>/charts/guacamole:X.Y.Z
+# and attaches the packaged chart (guacamole-X.Y.Z.tgz + .sha256) to the GitHub release.
+#
+# To release: set `version` in charts/guacamole/Chart.yaml to X.Y.Z (appVersion is the Guacamole
+# version and changes independently), run helm-docs, commit, then
+# `git tag vX.Y.Z && git push origin vX.Y.Z`.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+# Releases run one after another, never in parallel.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CHART: charts/guacamole
+  HELM_UNITTEST_VERSION: v1.2.1
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - name: Tag matches Chart.yaml
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          chart="$(awk '/^version:/ {print $2}' "$CHART/Chart.yaml")"
+          app="$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2}' "$CHART/Chart.yaml")"
+          if [ "$chart" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Chart.yaml (version $chart)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+      - name: Lint, test and package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Helm 4 verifies plugin signatures; helm-unittest is installed from source.
+          args=(); if helm version --short | grep -q '^v4'; then args+=(--verify=false); fi
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "$HELM_UNITTEST_VERSION" "${args[@]}"
+          helm lint "$CHART" --strict
+          helm unittest "$CHART"
+          mkdir -p dist
+          helm package "$CHART" --destination dist
+          (cd dist && sha256sum "guacamole-${VERSION}.tgz" > "guacamole-${VERSION}.tgz.sha256")
+      # A new package starts private: set it to public once in the package settings on GitHub.
+      - name: Push chart to ghcr.io (OCI)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          helm push "dist/guacamole-${VERSION}.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          APP: ${{ steps.version.outputs.app }}
+        run: |
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          chart="oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts/guacamole"
+          cat > notes.md <<NOTES
+          Helm chart for Apache Guacamole ${APP}.
+
+          Install from ghcr.io:
+
+          \`\`\`sh
+          helm upgrade --install guacamole ${chart} --version ${VERSION} \\
+            -n guacamole --create-namespace --wait
+          \`\`\`
+
+          Or from the attached package (\`${base}/guacamole-${VERSION}.tgz\`, checksum in \`.sha256\`):
+
+          \`\`\`sh
+          curl -LO ${base}/guacamole-${VERSION}.tgz
+          helm upgrade --install guacamole guacamole-${VERSION}.tgz -n guacamole --create-namespace --wait
+          \`\`\`
+
+          See the chart README for database modes, authentication, exposure and all values.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/*.tgz dist/*.sha256 \
+            --title "guacamole chart ${VERSION}" \
+            --notes-file notes.md \
+            --generate-notes \
+            --verify-tag

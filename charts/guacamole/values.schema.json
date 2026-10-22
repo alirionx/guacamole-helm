@@ -274,6 +274,183 @@
               "type": "string"
             }
           }
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minAvailable": {
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
+            },
+            "maxUnavailable": {
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "autoscaling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "targetCPUUtilizationPercentage": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "targetMemoryUtilizationPercentage": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "behavior": {
+              "type": "object"
+            }
+          }
+        },
+        "extraProperties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "extensionsInit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resources": {
+              "type": "object"
+            }
+          }
+        },
+        "extraExtensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9]{0,40}[a-z0-9])?$"
+              },
+              "image": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "registry": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "tag": {
+                    "type": [
+                      "string",
+                      "number"
+                    ]
+                  },
+                  "digest": {
+                    "type": "string",
+                    "pattern": "^(|sha256:[a-f0-9]+)$"
+                  },
+                  "pullPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "Always",
+                      "IfNotPresent",
+                      "Never"
+                    ]
+                  }
+                }
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "imagePullSecrets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https?://"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "fileName": {
+                "type": "string",
+                "pattern": "^$|^[A-Za-z0-9._-]+\\.jar$"
+              },
+              "imageVolume": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reference"
+                ],
+                "properties": {
+                  "reference": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pullPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "Always",
+                      "IfNotPresent",
+                      "Never"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^[^/]"
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -425,6 +602,63 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 65535
+            }
+          }
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minAvailable": {
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
+            },
+            "maxUnavailable": {
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "autoscaling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "targetCPUUtilizationPercentage": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "targetMemoryUtilizationPercentage": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "behavior": {
+              "type": "object"
             }
           }
         }
@@ -1099,6 +1333,78 @@
               }
             }
           }
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "dns": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "guacamole": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "extraEgress": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "guacd": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "egressTo": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "database": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "externalTo": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "kubeApiServer": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "kubeApiServerPorts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "minItems": 1
         }
       }
     }

@@ -1,0 +1,116 @@
+suite: PodDisruptionBudget and HorizontalPodAutoscaler
+templates:
+  - guacamole/pdb.yaml
+  - guacamole/hpa.yaml
+  - guacamole/deployment.yaml
+  - guacamole/configmap.yaml
+  - guacd/pdb.yaml
+  - guacd/hpa.yaml
+  - guacd/deployment.yaml
+release:
+  name: test
+tests:
+  - it: renders no PDB or HPA by default and keeps replicaCount
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: guacamole/pdb.yaml
+      - hasDocuments:
+          count: 0
+        template: guacamole/hpa.yaml
+      - hasDocuments:
+          count: 0
+        template: guacd/pdb.yaml
+      - equal:
+          path: spec.replicas
+          value: 1
+        template: guacamole/deployment.yaml
+  - it: creates a PDB with maxUnavailable 1 by default
+    template: guacamole/pdb.yaml
+    set:
+      guacamole.podDisruptionBudget.enabled: true
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+      - notExists:
+          path: spec.minAvailable
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: guacamole
+  - it: supports minAvailable for guacd
+    template: guacd/pdb.yaml
+    set:
+      guacd.podDisruptionBudget.enabled: true
+      guacd.podDisruptionBudget.minAvailable: 50%
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 50%
+      - equal:
+          path: metadata.name
+          value: test-guacamole-guacd
+  - it: rejects minAvailable together with maxUnavailable
+    template: guacamole/pdb.yaml
+    set:
+      guacamole.podDisruptionBudget.enabled: true
+      guacamole.podDisruptionBudget.minAvailable: 1
+      guacamole.podDisruptionBudget.maxUnavailable: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: set either minAvailable or maxUnavailable
+  - it: creates an HPA and drops replicas from the Deployment
+    set:
+      guacamole.autoscaling.enabled: true
+      guacamole.autoscaling.minReplicas: 2
+      guacamole.autoscaling.maxReplicas: 5
+      guacamole.autoscaling.targetMemoryUtilizationPercentage: 75
+      guacamole.autoscaling.behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 600
+    asserts:
+      - equal:
+          path: spec.scaleTargetRef
+          value:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: test-guacamole
+        template: guacamole/hpa.yaml
+      - equal:
+          path: spec.minReplicas
+          value: 2
+        template: guacamole/hpa.yaml
+      - equal:
+          path: spec.maxReplicas
+          value: 5
+        template: guacamole/hpa.yaml
+      - lengthEqual:
+          path: spec.metrics
+          count: 2
+        template: guacamole/hpa.yaml
+      - equal:
+          path: spec.behavior.scaleDown.stabilizationWindowSeconds
+          value: 600
+        template: guacamole/hpa.yaml
+      - notExists:
+          path: spec.replicas
+        template: guacamole/deployment.yaml
+  - it: creates an HPA for guacd
+    set:
+      guacd.autoscaling.enabled: true
+    asserts:
+      - equal:
+          path: spec.scaleTargetRef.name
+          value: test-guacamole-guacd
+        template: guacd/hpa.yaml
+      - notExists:
+          path: spec.replicas
+        template: guacd/deployment.yaml
+  - it: requires at least one HPA metric
+    template: guacamole/hpa.yaml
+    set:
+      guacamole.autoscaling.enabled: true
+      guacamole.autoscaling.targetCPUUtilizationPercentage: null
+    asserts:
+      - failedTemplate:
+          errorPattern: set targetCPUUtilizationPercentage and/or targetMemoryUtilizationPercentage

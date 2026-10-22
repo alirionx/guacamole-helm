@@ -1,0 +1,5 @@
+# chart-testing: default setup (embedded PostgreSQL), small PVC.
+database:
+  embedded:
+    persistence:
+      size: 1Gi

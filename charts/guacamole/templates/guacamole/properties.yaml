@@ -1,0 +1,15 @@
+{{- if .Values.guacamole.extraProperties }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "guacamole.fullname" . }}-properties
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guacamole.componentLabels" (dict "context" . "component" "guacamole") | nindent 4 }}
+data:
+  guacamole.properties: |
+    # Additional properties from guacamole.extraProperties
+    {{- range $key, $value := .Values.guacamole.extraProperties }}
+    {{ $key }}: {{ $value }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,198 @@
+suite: extra extensions and properties
+templates:
+  - guacamole/deployment.yaml
+  - guacamole/configmap.yaml
+  - guacamole/properties.yaml
+release:
+  name: test
+tests:
+  - it: adds nothing by default
+    template: guacamole/deployment.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+      - lengthEqual:
+          path: spec.template.spec.volumes
+          count: 1
+  - it: copies JARs from an extension image with an init container
+    template: guacamole/deployment.yaml
+    set:
+      imagePullSecrets: [{name: global}]
+      guacamole.extraExtensions:
+        - name: my-ext
+          image: {registry: ghcr.io, repository: example/ext, tag: "1.0", pullPolicy: Always}
+          path: /jars
+          imagePullSecrets: [{name: ghcr}, {name: global}]
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: extension-my-ext
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: ghcr.io/example/ext:1.0
+      - equal:
+          path: spec.template.spec.initContainers[0].imagePullPolicy
+          value: Always
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: SOURCE
+            value: /jars
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.imagePullSecrets
+          value: [{name: global}, {name: ghcr}]
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: extensions
+            mountPath: /etc/guacamole/extensions
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: extensions
+            emptyDir: {}
+  - it: defaults the image path to /extensions
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraExtensions:
+        - name: my-ext
+          image: {repository: example/ext, tag: "1.0"}
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: SOURCE
+            value: /extensions
+  - it: downloads a JAR with checksum verification using the guacamole image
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraExtensions:
+        - name: dl
+          url: https://example.com/ext-1.0.jar
+          sha256: A8BFCB09642AF4302BDF2F84810ED4C95682074BE8A1883713A8F2BC34DEB91F
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: docker.io/guacamole/guacamole:1.6.0
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: SHA256
+            value: a8bfcb09642af4302bdf2f84810ed4c95682074be8a1883713a8f2bc34deb91f
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: FILE_NAME
+            value: dl.jar
+  - it: requires a checksum for URL sources
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraExtensions:
+        - name: dl
+          url: https://example.com/ext.jar
+    asserts:
+      - failedTemplate:
+          errorPattern: sha256 \(64 hex characters\) is required
+  - it: rejects an invalid checksum
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraExtensions:
+        - name: dl
+          url: https://example.com/ext.jar
+          sha256: abc
+    asserts:
+      - failedTemplate:
+          errorPattern: sha256 \(64 hex characters\) is required
+  - it: requires exactly one source
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraExtensions:
+        - name: both
+          url: https://example.com/ext.jar
+          sha256: a8bfcb09642af4302bdf2f84810ed4c95682074be8a1883713a8f2bc34deb91f
+          image: {repository: example/ext, tag: "1.0"}
+    asserts:
+      - failedTemplate:
+          errorPattern: set exactly one source
+  - it: rejects duplicate names
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraExtensions:
+        - name: a
+          image: {repository: example/a, tag: "1"}
+        - name: a
+          image: {repository: example/b, tag: "1"}
+    asserts:
+      - failedTemplate:
+          errorPattern: duplicate name
+  - it: mounts an image volume directory without init container
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraExtensions:
+        - name: vol
+          imageVolume:
+            reference: ghcr.io/example/ext:1.0
+            path: jars
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: extensions
+            image:
+              reference: ghcr.io/example/ext:1.0
+              pullPolicy: IfNotPresent
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: extensions
+            mountPath: /etc/guacamole/extensions
+            subPath: jars
+            readOnly: true
+  - it: allows an image volume only as the single extension
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraExtensions:
+        - name: vol
+          imageVolume: {reference: ghcr.io/example/ext:1.0}
+        - name: other
+          image: {repository: example/b, tag: "1"}
+    asserts:
+      - failedTemplate:
+          errorPattern: an imageVolume source must be the only extension
+  - it: renders extraProperties into guacamole.properties
+    template: guacamole/properties.yaml
+    set:
+      guacamole.extraProperties:
+        api-session-timeout: "120"
+        skip-if-unavailable: postgresql
+    asserts:
+      - matchRegex:
+          path: data["guacamole.properties"]
+          pattern: "api-session-timeout: 120\\n"
+      - matchRegex:
+          path: data["guacamole.properties"]
+          pattern: "skip-if-unavailable: postgresql"
+  - it: mounts guacamole.properties and rolls out on changes
+    template: guacamole/deployment.yaml
+    set:
+      guacamole.extraProperties:
+        api-session-timeout: "120"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: properties
+            mountPath: /etc/guacamole/guacamole.properties
+            subPath: guacamole.properties
+      - exists:
+          path: spec.template.metadata.annotations["checksum/properties"]
+  - it: renders no properties ConfigMap by default
+    template: guacamole/properties.yaml
+    asserts:
+      - hasDocuments:
+          count: 0

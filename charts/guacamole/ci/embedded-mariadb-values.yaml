@@ -1,0 +1,12 @@
+# chart-testing: embedded MariaDB with NetworkPolicies, PDB and a custom context path.
+guacamole:
+  contextPath: /guacamole
+  podDisruptionBudget:
+    enabled: true
+database:
+  type: mysql
+  embedded:
+    persistence:
+      size: 1Gi
+networkPolicy:
+  enabled: true

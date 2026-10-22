@@ -1,0 +1,139 @@
+suite: NetworkPolicies
+templates:
+  - network/networkpolicies.yaml
+release:
+  name: test
+tests:
+  - it: renders nothing by default
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: creates one policy per component with the embedded database
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 5
+      - isKind:
+          of: NetworkPolicy
+  - it: lets the webapp reach guacd, the database and DNS only
+    set:
+      networkPolicy.enabled: true
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress, Egress]
+      - lengthEqual:
+          path: spec.egress
+          count: 3
+      - equal:
+          path: spec.egress[1].ports[0].port
+          value: 4822
+      - equal:
+          path: spec.egress[2].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: database
+      - notExists:
+          path: spec.ingress[0].from
+  - it: restricts webapp sources and adds extra egress
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.guacamole.from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+      networkPolicy.guacamole.extraEgress:
+        - to:
+            - ipBlock:
+                cidr: 203.0.113.0/24
+          ports:
+            - protocol: TCP
+              port: 443
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: traefik
+      - equal:
+          path: spec.egress[3].to[0].ipBlock.cidr
+          value: 203.0.113.0/24
+  - it: allows all guacd egress unless restricted
+    set:
+      networkPolicy.enabled: true
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.egress[1]
+          value: {}
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: guacamole
+  - it: restricts guacd egress to the given targets
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.guacd.egressTo:
+        - to:
+            - ipBlock:
+                cidr: 10.20.0.0/16
+          ports:
+            - protocol: TCP
+              port: 3389
+    documentIndex: 1
+    asserts:
+      - lengthEqual:
+          path: spec.egress
+          count: 2
+      - equal:
+          path: spec.egress[1].ports[0].port
+          value: 3389
+  - it: allows the secret init job to reach the Kubernetes API
+    set:
+      networkPolicy.enabled: true
+    documentIndex: 3
+    asserts:
+      - equal:
+          path: metadata.name
+          value: test-guacamole-secrets-init
+      - equal:
+          path: spec.egress[1].ports
+          value:
+            - protocol: TCP
+              port: 443
+            - protocol: TCP
+              port: 6443
+  - it: denies egress of the embedded database
+    set:
+      networkPolicy.enabled: true
+    documentIndex: 4
+    asserts:
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress, Egress]
+      - notExists:
+          path: spec.egress
+      - lengthEqual:
+          path: spec.ingress[0].from
+          count: 2
+  - it: targets the external database
+    set:
+      networkPolicy.enabled: true
+      database.mode: external
+      database.type: mysql
+      database.external.host: db.example.com
+      database.external.existingSecret: db
+      networkPolicy.database.externalTo:
+        - ipBlock:
+            cidr: 10.30.0.5/32
+    asserts:
+      - hasDocuments:
+          count: 4
+      - equal:
+          path: spec.egress[2]
+          value:
+            ports:
+              - protocol: TCP
+                port: 3306
+            to:
+              - ipBlock:
+                  cidr: 10.30.0.5/32
+        documentIndex: 0

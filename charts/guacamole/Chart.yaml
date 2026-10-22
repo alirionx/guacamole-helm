@@ -5,9 +5,10 @@ type: application
 version: 0.1.0
 appVersion: "1.6.0"
 kubeVersion: ">=1.29.0-0"
-home: https://guacamole.apache.org/
+home: https://github.com/alirionx/guacamole-helm
 icon: https://guacamole.apache.org/images/logos/guac-tricolor-logo.svg
 sources:
+  - https://github.com/alirionx/guacamole-helm
   - https://github.com/apache/guacamole-client
   - https://github.com/apache/guacamole-server
 keywords:

@@ -13,8 +13,13 @@ the intended model for running multiple independent instances.
 ## Quick start
 
 ```bash
-helm upgrade --install guacamole charts/guacamole -n guacamole --create-namespace --wait
+helm upgrade --install guacamole oci://ghcr.io/alirionx/charts/guacamole \
+  -n guacamole --create-namespace --wait
 ```
+
+Every release is also attached to the
+[GitHub releases](https://github.com/alirionx/guacamole-helm/releases) as `guacamole-<version>.tgz`
+(with `.sha256`).
 
 This deploys Guacamole with an embedded PostgreSQL database. All passwords are generated; the
 release notes show how to read the `guacadmin` password.
@@ -182,6 +187,35 @@ created accounts). See `examples/oidc-keycloak-totp.yaml` for a complete example
 - Both support `bypassHosts`/`enforceHosts` (IPs/CIDRs). They depend on the correct client IP; behind
   a proxy this requires the RemoteIpValve (see [Client IP behind a proxy](#client-ip-behind-a-proxy)).
 
+## Additional extensions and properties
+
+Official extensions are part of the image and enabled through `auth.*` only. For other extensions,
+`guacamole.extraExtensions` takes a list of entries with exactly one source each:
+
+| Source | How it works | Requirements |
+|---|---|---|
+| `image` (recommended) | an init container copies all `*.jar` from `path` (default `/extensions`) of the image | the image contains `/bin/sh` and `cp` (e.g. `FROM busybox`), world-readable JARs; `imagePullSecrets` per entry |
+| `url` | an init container (guacamole image) downloads the JAR and verifies `sha256`; the pod does not start on a mismatch | `sha256` is mandatory; with NetworkPolicies allow the download via `networkPolicy.guacamole.extraEgress` |
+| `imageVolume` | the directory `path` (default `extensions`) of an image is mounted as `GUACAMOLE_HOME/extensions`, no init container | Kubernetes image volumes supported by cluster and container runtime; must be the only entry, since container runtimes only mount directories from image volumes |
+
+The JARs end up in the template `GUACAMOLE_HOME` (`/etc/guacamole/extensions`); the image's
+entrypoint links them into the generated home next to the official extensions it enables from
+environment variables, so both coexist. Only JARs directly in that directory are loaded. Do not
+provide the same extension twice (e.g. an official one that is also enabled via `auth.*`): the
+webapp fails to start.
+
+Example image (`examples/extension-image/Dockerfile`):
+
+```dockerfile
+FROM busybox:1.36
+COPY --chmod=0644 my-guacamole-extension-1.0.0.jar /extensions/
+```
+
+Alternatively, build your own image `FROM guacamole/guacamole` and set `guacamole.image`.
+
+`guacamole.extraProperties` adds entries to `guacamole.properties` (e.g. `api-session-timeout`),
+and `guacamole.extraEnv` adds environment variables, for options the chart does not model.
+
 ## Exposure
 
 Guacamole is served at `guacamole.contextPath` (default `/`). It can be exposed in three ways,
@@ -240,9 +274,39 @@ guacamole:
 
 ## Security
 
-Both pods run as non-root with a read-only root filesystem, no capabilities, no privilege
-escalation and the `RuntimeDefault` seccomp profile, and are compatible with the Pod Security
-Standard `restricted`. Kubernetes service links are disabled because the official image enables
+All pods (webapp, guacd, embedded database, init jobs) run as non-root with a read-only root
+filesystem, no capabilities, no privilege escalation and the `RuntimeDefault` seccomp profile, and
+are compatible with the Pod Security Standard `restricted`. Only the secret init job mounts a
+ServiceAccount token. Kubernetes service links are disabled because the official image enables
 extensions based on environment variable prefixes.
+
+### NetworkPolicies
+
+`networkPolicy.enabled: true` creates a default-deny policy per component that only allows:
+
+| Pod | Ingress | Egress |
+|---|---|---|
+| webapp | port 8080 from `networkPolicy.guacamole.from` (empty: all sources) | DNS, guacd, database, `networkPolicy.guacamole.extraEgress` |
+| guacd | port 4822 from the webapp | DNS, `networkPolicy.guacd.egressTo` (empty: everything) |
+| embedded database | database port from the webapp and the schema job | none |
+| schema init job | none | DNS, database |
+| secret init job | none | DNS, Kubernetes API (`networkPolicy.kubeApiServer`) |
+
+- Set `networkPolicy.guacamole.from` to the namespace of your ingress controller or Gateway.
+- With OIDC or Duo, allow the webapp to reach the identity provider's JWKS endpoint or the Duo API
+  via `networkPolicy.guacamole.extraEgress`, otherwise logins fail.
+- Restrict `networkPolicy.guacd.egressTo` to the networks and ports of your remote desktop targets:
+  guacd connects wherever a connection points to.
+- For an external database, `networkPolicy.database.externalTo` narrows the destination.
+- The policies need a CNI that enforces NetworkPolicies.
+
+## Availability and scaling
+
+- `guacamole.podDisruptionBudget` / `guacd.podDisruptionBudget` create PodDisruptionBudgets
+  (default `maxUnavailable: 1`). With a single replica, `minAvailable: 1` blocks node drains.
+- `guacamole.autoscaling` / `guacd.autoscaling` create HorizontalPodAutoscalers (CPU and/or memory
+  utilization, optional `behavior`) and replace `replicaCount`; they require metrics-server. More
+  than one webapp replica requires sticky sessions (see [Sticky sessions](#sticky-sessions)).
+- The embedded database always runs as a single replica.
 
 {{ template "chart.valuesSection" . }}

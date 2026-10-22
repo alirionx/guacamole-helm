@@ -1,0 +1,1 @@
+{{- include "guacamole.hpa" (dict "context" . "component" "guacamole" "name" (include "guacamole.fullname" .) "values" .Values.guacamole) }}

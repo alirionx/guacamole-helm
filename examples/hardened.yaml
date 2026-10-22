@@ -1,0 +1,43 @@
+# NetworkPolicies, PodDisruptionBudgets and autoscaling. Traffic to the webapp is only allowed from
+# the Traefik namespace; guacd may only connect to the RDP/SSH targets in 10.20.0.0/16.
+guacamole:
+  podDisruptionBudget:
+    enabled: true
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+  service:
+    annotations:
+      # sticky sessions are required with more than one webapp replica
+      traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+guacd:
+  podDisruptionBudget:
+    enabled: true
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+ingress:
+  enabled: true
+  className: traefik
+  hosts: [guacamole.example.com]
+  tls:
+    enabled: true
+networkPolicy:
+  enabled: true
+  guacamole:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: traefik
+  guacd:
+    egressTo:
+      - to:
+          - ipBlock:
+              cidr: 10.20.0.0/16
+        ports:
+          - protocol: TCP
+            port: 3389
+          - protocol: TCP
+            port: 22

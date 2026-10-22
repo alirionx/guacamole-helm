@@ -42,6 +42,44 @@ guacamole:
   # -- Additional environment variables for the webapp container (list of EnvVar objects).
   extraEnv: []
 
+  # -- Additional `guacamole.properties` entries (map of property name to value), e.g.
+  # `{api-session-timeout: "120"}`. Rendered into `GUACAMOLE_HOME/guacamole.properties`; official
+  # extensions are still enabled through `auth.*` or environment variables only.
+  extraProperties: {}
+
+  # -- Additional (non-official) extensions, each with exactly one source: `image` (recommended; an init
+  # container copies `*.jar` from `path` of the image), `url` (download, `sha256` required) or `imageVolume`
+  # (Kubernetes image volume without init container; requires cluster support and must be the only entry,
+  # since its directory `path` is mounted as `GUACAMOLE_HOME/extensions`). See README for examples.
+  extraExtensions: []
+  # - name: my-extension
+  #   image:
+  #     registry: ghcr.io
+  #     repository: example/guacamole-extension
+  #     tag: "1.0.0"
+  #     digest: ""
+  #     pullPolicy: IfNotPresent
+  #   path: /extensions
+  #   imagePullSecrets: []
+  # - name: downloaded
+  #   url: https://example.com/guacamole-extension-1.0.0.jar
+  #   sha256: <64 hex characters>
+  #   fileName: ""
+  # - name: mounted
+  #   imageVolume:
+  #     reference: ghcr.io/example/guacamole-extension:1.0.0
+  #     pullPolicy: IfNotPresent
+  #     path: extensions
+
+  extensionsInit:
+    # -- Resource requests and limits of the init containers providing `extraExtensions`.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+
   service:
     # -- Service type (`ClusterIP`, `NodePort`, `LoadBalancer`).
     type: ClusterIP
@@ -61,6 +99,28 @@ guacamole:
     externalTrafficPolicy: ""
     # -- Session affinity (`None` or `ClientIP`). Use `ClientIP` for sticky sessions when exposing via LoadBalancer with more than one replica.
     sessionAffinity: None
+
+  podDisruptionBudget:
+    # -- Create a PodDisruptionBudget for the webapp pods.
+    enabled: false
+    # -- Minimum available pods (set either this or `maxUnavailable`).
+    minAvailable: null
+    # -- Maximum unavailable pods (default 1 if neither value is set).
+    maxUnavailable: null
+
+  autoscaling:
+    # -- Create a HorizontalPodAutoscaler for the webapp Deployment (replaces `replicaCount`; requires metrics-server).
+    enabled: false
+    # -- Minimum number of replicas.
+    minReplicas: 1
+    # -- Maximum number of replicas.
+    maxReplicas: 3
+    # -- Target average CPU utilization in percent (of the CPU request).
+    targetCPUUtilizationPercentage: 80
+    # -- Target average memory utilization in percent (of the memory request; null: not used).
+    targetMemoryUtilizationPercentage: null
+    # -- Scaling behavior (HorizontalPodAutoscaler `spec.behavior`).
+    behavior: {}
 
   remoteIpValve:
     # -- Enable Tomcat's RemoteIpValve, so that the client IP and protocol are taken from proxy headers
@@ -194,6 +254,28 @@ guacd:
     # -- guacd service port.
     port: 4822
 
+  podDisruptionBudget:
+    # -- Create a PodDisruptionBudget for the guacd pods.
+    enabled: false
+    # -- Minimum available pods (set either this or `maxUnavailable`).
+    minAvailable: null
+    # -- Maximum unavailable pods (default 1 if neither value is set).
+    maxUnavailable: null
+
+  autoscaling:
+    # -- Create a HorizontalPodAutoscaler for the guacd Deployment (replaces `replicaCount`; requires metrics-server).
+    enabled: false
+    # -- Minimum number of replicas.
+    minReplicas: 1
+    # -- Maximum number of replicas.
+    maxReplicas: 3
+    # -- Target average CPU utilization in percent (of the CPU request).
+    targetCPUUtilizationPercentage: 80
+    # -- Target average memory utilization in percent (of the memory request; null: not used).
+    targetMemoryUtilizationPercentage: null
+    # -- Scaling behavior (HorizontalPodAutoscaler `spec.behavior`).
+    behavior: {}
+
   # -- Liveness probe of the guacd container.
   livenessProbe:
     initialDelaySeconds: 10
@@ -242,6 +324,39 @@ guacd:
   affinity: {}
   # -- Topology spread constraints.
   topologySpreadConstraints: []
+
+networkPolicy:
+  # -- Create NetworkPolicies for all pods of this chart (default deny, only the traffic listed below).
+  enabled: false
+  # -- Peers allowed for DNS lookups (default: kube-dns/CoreDNS in kube-system).
+  dns:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+  guacamole:
+    # -- Peers allowed to reach the webapp (NetworkPolicyPeer list, e.g. the namespace of the ingress
+    # controller or Gateway). Empty: all sources may connect to the webapp port.
+    from: []
+    # -- Additional egress rules of the webapp (NetworkPolicyEgressRule list), e.g. the identity provider
+    # (OIDC JWKS endpoint) or the Duo API.
+    extraEgress: []
+  guacd:
+    # -- Egress rules of guacd to the remote desktop targets (NetworkPolicyEgressRule list). Empty: guacd
+    # may connect anywhere. Restricting this is recommended.
+    egressTo: []
+  database:
+    # -- Egress rule to the external database (NetworkPolicyPeer list; only for `database.mode: external`).
+    # Empty: any destination on the database port.
+    externalTo: []
+  # -- Peers of the Kubernetes API server for the secret init job (API server endpoints are not pods).
+  kubeApiServer:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+  # -- Ports of the Kubernetes API server.
+  kubeApiServerPorts: [443, 6443]
 
 database:
   # -- Database type: `postgresql` or `mysql` (MySQL and MariaDB; the embedded mode uses MariaDB).

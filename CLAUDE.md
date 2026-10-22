@@ -25,13 +25,16 @@ charts/guacamole/
     secrets/        # secret init job + its RBAC (Helm/Argo CD pre-sync hooks)
     auth/           # env mapping helpers for OIDC, TOTP, Duo
     network/        # Ingress, HTTPRoute, NetworkPolicies
+    tests/          # helm test pod
     serviceaccount.yaml
     NOTES.txt
   files/            # shell scripts of the init jobs (checked with shellcheck)
   tests/            # helm-unittest
+  ci/               # values for chart-testing (ct install)
 examples/           # example values
-ci/                 # values for chart-testing
-.github/workflows/
+ci/                 # integration test scripts (OIDC against Dex, upgrade from the latest release)
+ct.yaml             # chart-testing configuration
+.github/workflows/  # ci.yaml (lint, tests, kind), release.yaml (tag vX.Y.Z -> ghcr.io + GitHub release)
 ```
 
 ## Way of working
@@ -77,6 +80,8 @@ helm template test charts/guacamole | kubeconform -strict -summary \
   -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 ct lint --config ct.yaml
 ct install --config ct.yaml   # requires a running kind cluster
+ci/oidc-dex.sh                # integration test: OIDC against Dex (kind cluster)
+ci/upgrade-test.sh            # integration test: upgrade from the latest release (kind cluster)
 helm-docs
 ```
 

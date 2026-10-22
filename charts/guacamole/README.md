@@ -15,8 +15,13 @@ Kubernetes: `>=1.29.0-0`
 ## Quick start
 
 ```bash
-helm upgrade --install guacamole charts/guacamole -n guacamole --create-namespace --wait
+helm upgrade --install guacamole oci://ghcr.io/alirionx/charts/guacamole \
+  -n guacamole --create-namespace --wait
 ```
+
+Every release is also attached to the
+[GitHub releases](https://github.com/alirionx/guacamole-helm/releases) as `guacamole-<version>.tgz`
+(with `.sha256`).
 
 This deploys Guacamole with an embedded PostgreSQL database. All passwords are generated; the
 release notes show how to read the `guacadmin` password.
@@ -184,6 +189,35 @@ created accounts). See `examples/oidc-keycloak-totp.yaml` for a complete example
 - Both support `bypassHosts`/`enforceHosts` (IPs/CIDRs). They depend on the correct client IP; behind
   a proxy this requires the RemoteIpValve (see [Client IP behind a proxy](#client-ip-behind-a-proxy)).
 
+## Additional extensions and properties
+
+Official extensions are part of the image and enabled through `auth.*` only. For other extensions,
+`guacamole.extraExtensions` takes a list of entries with exactly one source each:
+
+| Source | How it works | Requirements |
+|---|---|---|
+| `image` (recommended) | an init container copies all `*.jar` from `path` (default `/extensions`) of the image | the image contains `/bin/sh` and `cp` (e.g. `FROM busybox`), world-readable JARs; `imagePullSecrets` per entry |
+| `url` | an init container (guacamole image) downloads the JAR and verifies `sha256`; the pod does not start on a mismatch | `sha256` is mandatory; with NetworkPolicies allow the download via `networkPolicy.guacamole.extraEgress` |
+| `imageVolume` | the directory `path` (default `extensions`) of an image is mounted as `GUACAMOLE_HOME/extensions`, no init container | Kubernetes image volumes supported by cluster and container runtime; must be the only entry, since container runtimes only mount directories from image volumes |
+
+The JARs end up in the template `GUACAMOLE_HOME` (`/etc/guacamole/extensions`); the image's
+entrypoint links them into the generated home next to the official extensions it enables from
+environment variables, so both coexist. Only JARs directly in that directory are loaded. Do not
+provide the same extension twice (e.g. an official one that is also enabled via `auth.*`): the
+webapp fails to start.
+
+Example image (`examples/extension-image/Dockerfile`):
+
+```dockerfile
+FROM busybox:1.36
+COPY --chmod=0644 my-guacamole-extension-1.0.0.jar /extensions/
+```
+
+Alternatively, build your own image `FROM guacamole/guacamole` and set `guacamole.image`.
+
+`guacamole.extraProperties` adds entries to `guacamole.properties` (e.g. `api-session-timeout`),
+and `guacamole.extraEnv` adds environment variables, for options the chart does not model.
+
 ## Exposure
 
 Guacamole is served at `guacamole.contextPath` (default `/`). It can be exposed in three ways,
@@ -242,10 +276,40 @@ guacamole:
 
 ## Security
 
-Both pods run as non-root with a read-only root filesystem, no capabilities, no privilege
-escalation and the `RuntimeDefault` seccomp profile, and are compatible with the Pod Security
-Standard `restricted`. Kubernetes service links are disabled because the official image enables
+All pods (webapp, guacd, embedded database, init jobs) run as non-root with a read-only root
+filesystem, no capabilities, no privilege escalation and the `RuntimeDefault` seccomp profile, and
+are compatible with the Pod Security Standard `restricted`. Only the secret init job mounts a
+ServiceAccount token. Kubernetes service links are disabled because the official image enables
 extensions based on environment variable prefixes.
+
+### NetworkPolicies
+
+`networkPolicy.enabled: true` creates a default-deny policy per component that only allows:
+
+| Pod | Ingress | Egress |
+|---|---|---|
+| webapp | port 8080 from `networkPolicy.guacamole.from` (empty: all sources) | DNS, guacd, database, `networkPolicy.guacamole.extraEgress` |
+| guacd | port 4822 from the webapp | DNS, `networkPolicy.guacd.egressTo` (empty: everything) |
+| embedded database | database port from the webapp and the schema job | none |
+| schema init job | none | DNS, database |
+| secret init job | none | DNS, Kubernetes API (`networkPolicy.kubeApiServer`) |
+
+- Set `networkPolicy.guacamole.from` to the namespace of your ingress controller or Gateway.
+- With OIDC or Duo, allow the webapp to reach the identity provider's JWKS endpoint or the Duo API
+  via `networkPolicy.guacamole.extraEgress`, otherwise logins fail.
+- Restrict `networkPolicy.guacd.egressTo` to the networks and ports of your remote desktop targets:
+  guacd connects wherever a connection points to.
+- For an external database, `networkPolicy.database.externalTo` narrows the destination.
+- The policies need a CNI that enforces NetworkPolicies.
+
+## Availability and scaling
+
+- `guacamole.podDisruptionBudget` / `guacd.podDisruptionBudget` create PodDisruptionBudgets
+  (default `maxUnavailable: 1`). With a single replica, `minAvailable: 1` blocks node drains.
+- `guacamole.autoscaling` / `guacd.autoscaling` create HorizontalPodAutoscalers (CPU and/or memory
+  utilization, optional `behavior`) and replace `replicaCount`; they require metrics-server. More
+  than one webapp replica requires sticky sessions (see [Sticky sessions](#sticky-sessions)).
+- The embedded database always runs as a single replica.
 
 ## Values
 
@@ -327,8 +391,17 @@ extensions based on environment variable prefixes.
 | database.type | string | `"postgresql"` | Database type: `postgresql` or `mysql` (MySQL and MariaDB; the embedded mode uses MariaDB). |
 | fullnameOverride | string | `""` | Overrides the full resource name prefix (default: `<release>-<chart>`). |
 | guacamole.affinity | object | `{}` | Affinity rules. |
+| guacamole.autoscaling.behavior | object | `{}` | Scaling behavior (HorizontalPodAutoscaler `spec.behavior`). |
+| guacamole.autoscaling.enabled | bool | `false` | Create a HorizontalPodAutoscaler for the webapp Deployment (replaces `replicaCount`; requires metrics-server). |
+| guacamole.autoscaling.maxReplicas | int | `3` | Maximum number of replicas. |
+| guacamole.autoscaling.minReplicas | int | `1` | Minimum number of replicas. |
+| guacamole.autoscaling.targetCPUUtilizationPercentage | int | `80` | Target average CPU utilization in percent (of the CPU request). |
+| guacamole.autoscaling.targetMemoryUtilizationPercentage | string | `nil` | Target average memory utilization in percent (of the memory request; null: not used). |
 | guacamole.contextPath | string | `"/"` | URL path under which Guacamole is served. Must start with `/`, e.g. `/` or `/guacamole`. |
+| guacamole.extensionsInit.resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}` | Resource requests and limits of the init containers providing `extraExtensions`. |
 | guacamole.extraEnv | list | `[]` | Additional environment variables for the webapp container (list of EnvVar objects). |
+| guacamole.extraExtensions | list | `[]` | Additional (non-official) extensions, each with exactly one source: `image` (recommended; an init container copies `*.jar` from `path` of the image), `url` (download, `sha256` required) or `imageVolume` (Kubernetes image volume without init container; requires cluster support and must be the only entry, since its directory `path` is mounted as `GUACAMOLE_HOME/extensions`). See README for examples. |
+| guacamole.extraProperties | object | `{}` | Additional `guacamole.properties` entries (map of property name to value), e.g. `{api-session-timeout: "120"}`. Rendered into `GUACAMOLE_HOME/guacamole.properties`; official extensions are still enabled through `auth.*` or environment variables only. |
 | guacamole.image.digest | string | `""` | Image digest (`sha256:...`); takes precedence over `tag`. |
 | guacamole.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
 | guacamole.image.registry | string | `"docker.io"` | Image registry of the guacamole webapp. |
@@ -338,6 +411,9 @@ extensions based on environment variable prefixes.
 | guacamole.logLevel | string | `"info"` | Webapp log level (`error`, `warn`, `info`, `debug`, `trace`). |
 | guacamole.nodeSelector | object | `{}` | Node selector. |
 | guacamole.podAnnotations | object | `{}` | Additional pod annotations. |
+| guacamole.podDisruptionBudget.enabled | bool | `false` | Create a PodDisruptionBudget for the webapp pods. |
+| guacamole.podDisruptionBudget.maxUnavailable | string | `nil` | Maximum unavailable pods (default 1 if neither value is set). |
+| guacamole.podDisruptionBudget.minAvailable | string | `nil` | Minimum available pods (set either this or `maxUnavailable`). |
 | guacamole.podLabels | object | `{}` | Additional pod labels. |
 | guacamole.podSecurityContext | object | `{"fsGroup":1001,"runAsGroup":1001,"runAsNonRoot":true,"runAsUser":1001,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod security context of the webapp pods (UID 1001 is the user of the official image). |
 | guacamole.readinessProbe | object | `{"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":5,"timeoutSeconds":5}` | Readiness probe of the webapp container. |
@@ -360,6 +436,12 @@ extensions based on environment variable prefixes.
 | guacamole.tolerations | list | `[]` | Tolerations. |
 | guacamole.topologySpreadConstraints | list | `[]` | Topology spread constraints. |
 | guacd.affinity | object | `{}` | Affinity rules. |
+| guacd.autoscaling.behavior | object | `{}` | Scaling behavior (HorizontalPodAutoscaler `spec.behavior`). |
+| guacd.autoscaling.enabled | bool | `false` | Create a HorizontalPodAutoscaler for the guacd Deployment (replaces `replicaCount`; requires metrics-server). |
+| guacd.autoscaling.maxReplicas | int | `3` | Maximum number of replicas. |
+| guacd.autoscaling.minReplicas | int | `1` | Minimum number of replicas. |
+| guacd.autoscaling.targetCPUUtilizationPercentage | int | `80` | Target average CPU utilization in percent (of the CPU request). |
+| guacd.autoscaling.targetMemoryUtilizationPercentage | string | `nil` | Target average memory utilization in percent (of the memory request; null: not used). |
 | guacd.extraEnv | list | `[]` | Additional environment variables for the guacd container (list of EnvVar objects). |
 | guacd.image.digest | string | `""` | Image digest (`sha256:...`); takes precedence over `tag`. |
 | guacd.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
@@ -370,6 +452,9 @@ extensions based on environment variable prefixes.
 | guacd.logLevel | string | `"info"` | guacd log level (`error`, `warning`, `info`, `debug`, `trace`). |
 | guacd.nodeSelector | object | `{}` | Node selector. |
 | guacd.podAnnotations | object | `{}` | Additional pod annotations. |
+| guacd.podDisruptionBudget.enabled | bool | `false` | Create a PodDisruptionBudget for the guacd pods. |
+| guacd.podDisruptionBudget.maxUnavailable | string | `nil` | Maximum unavailable pods (default 1 if neither value is set). |
+| guacd.podDisruptionBudget.minAvailable | string | `nil` | Minimum available pods (set either this or `maxUnavailable`). |
 | guacd.podLabels | object | `{}` | Additional pod labels. |
 | guacd.podSecurityContext | object | `{"fsGroup":1000,"runAsGroup":1000,"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod security context of the guacd pods (UID 1000 is the user of the official image). |
 | guacd.readinessProbe | object | `{"failureThreshold":3,"initialDelaySeconds":5,"periodSeconds":5,"timeoutSeconds":5}` | Readiness probe of the guacd container. |
@@ -420,6 +505,14 @@ extensions based on environment variable prefixes.
 | initJobs.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Container security context of the init job containers. |
 | initJobs.tolerations | list | `[]` | Tolerations of the init jobs. |
 | nameOverride | string | `""` | Overrides the chart name used in resource names. |
+| networkPolicy.database.externalTo | list | `[]` | Egress rule to the external database (NetworkPolicyPeer list; only for `database.mode: external`). Empty: any destination on the database port. |
+| networkPolicy.dns | list | `[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}},"podSelector":{"matchLabels":{"k8s-app":"kube-dns"}}}]` | Peers allowed for DNS lookups (default: kube-dns/CoreDNS in kube-system). |
+| networkPolicy.enabled | bool | `false` | Create NetworkPolicies for all pods of this chart (default deny, only the traffic listed below). |
+| networkPolicy.guacamole.extraEgress | list | `[]` | Additional egress rules of the webapp (NetworkPolicyEgressRule list), e.g. the identity provider (OIDC JWKS endpoint) or the Duo API. |
+| networkPolicy.guacamole.from | list | `[]` | Peers allowed to reach the webapp (NetworkPolicyPeer list, e.g. the namespace of the ingress controller or Gateway). Empty: all sources may connect to the webapp port. |
+| networkPolicy.guacd.egressTo | list | `[]` | Egress rules of guacd to the remote desktop targets (NetworkPolicyEgressRule list). Empty: guacd may connect anywhere. Restricting this is recommended. |
+| networkPolicy.kubeApiServer | list | `[{"ipBlock":{"cidr":"0.0.0.0/0"}}]` | Peers of the Kubernetes API server for the secret init job (API server endpoints are not pods). |
+| networkPolicy.kubeApiServerPorts | list | `[443,6443]` | Ports of the Kubernetes API server. |
 | serviceAccount.annotations | object | `{}` | Annotations for the ServiceAccount. |
 | serviceAccount.create | bool | `true` | Create a dedicated ServiceAccount for the guacamole and guacd pods. |
 | serviceAccount.name | string | `""` | Name of the ServiceAccount (default: fullname). Must exist if `create` is false. |
