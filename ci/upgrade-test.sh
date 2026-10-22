@@ -2,6 +2,7 @@
 # Upgrade test: installs the latest released chart version, creates data, upgrades to the chart in
 # this repository and verifies that the data and the guacadmin login survive (version policy of
 # the embedded database). Skipped if no release exists yet. Needs a kind cluster.
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
 NS="${NS:-guacamole-upgrade}"

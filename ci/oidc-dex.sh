@@ -4,6 +4,7 @@
 #
 # The script plays the browser: Guacamole redirects to Dex, the password form of Dex is posted,
 # Dex redirects back with the ID token in the URL fragment, which is posted to /api/tokens.
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
 NS="${NS:-guacamole-oidc}"
