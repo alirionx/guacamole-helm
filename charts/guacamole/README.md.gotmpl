@@ -34,7 +34,7 @@ feature depends on `lookup`, and rendering is deterministic.
 | Tool | Init jobs | Failing init job | Helm test |
 |---|---|---|---|
 | Helm CLI / pipelines | Helm hooks (`pre-install,pre-upgrade` / `post-install,post-upgrade`) | `helm upgrade --install --wait` fails (`--atomic` rolls back) | `helm test` |
-| Argo CD | sync hooks (`PreSync` / `PostSync`) | the sync fails | not used |
+| Argo CD | sync hooks (`PreSync` / `Sync`) | the sync fails | not used |
 | Flux | Helm hooks (helm-controller) | the release fails (remediation per `install`/`upgrade`) | `spec.test.enable: true` |
 
 All four paths are tested against this chart (Argo CD v3.5, Flux v2.9). Examples:
@@ -45,7 +45,11 @@ All four paths are tested against this chart (Argo CD v3.5, Flux v2.9). Examples
 - Flux: [`examples/gitops/flux-helmrelease.yaml`](../../examples/gitops/flux-helmrelease.yaml)
 
 Under Argo CD the ServiceAccount, Role and RoleBinding of the secret init job remain after a sync
-(hook delete policy `BeforeHookCreation`) and are recreated on the next sync.
+(hook delete policy `BeforeHookCreation`) and are recreated on the next sync. The schema init job
+runs as `Sync` hook (not `PostSync`), so the database is initialized even while other resources are
+still progressing. Argo CD only reports an Ingress as healthy once the ingress controller publishes
+its address in the Ingress status (Traefik: `providers.kubernetesIngress.publishedService.enabled`);
+otherwise the application stays "Progressing" although Guacamole works.
 
 ## Database
 
@@ -132,7 +136,7 @@ Helm CLI, CI pipelines, Argo CD and Flux):
 | Job | Helm hook | Argo CD hook | Purpose |
 |---|---|---|---|
 | `<fullname>-secrets-init` | `pre-install,pre-upgrade` | `PreSync` | Verifies referenced Secrets (exist, type `Opaque`, key present) and creates missing chart-managed Secrets with a random value |
-| `<fullname>-schema-init` | `post-install,post-upgrade` | `PostSync` | Loads the database schema if it is missing, checks the schema version and secures the `guacadmin` account |
+| `<fullname>-schema-init` | `post-install,post-upgrade` | `Sync` | Loads the database schema if it is missing, checks the schema version and secures the `guacadmin` account |
 
 Both jobs are idempotent. A failing job makes `helm install/upgrade --wait` fail.
 

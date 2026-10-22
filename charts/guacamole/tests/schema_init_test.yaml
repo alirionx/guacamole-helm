@@ -7,14 +7,14 @@ release:
   name: test
   namespace: guac
 tests:
-  - it: runs as post-install/post-upgrade hook and Argo CD PostSync hook
+  - it: runs as post-install/post-upgrade hook and Argo CD Sync hook
     asserts:
       - equal:
           path: metadata.annotations["helm.sh/hook"]
           value: post-install,post-upgrade
       - equal:
           path: metadata.annotations["argocd.argoproj.io/hook"]
-          value: PostSync
+          value: Sync
   - it: generates the schema from the guacamole image
     asserts:
       - equal:

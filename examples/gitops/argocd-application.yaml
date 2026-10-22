@@ -1,5 +1,5 @@
 # Argo CD: one Guacamole instance from the OCI chart on ghcr.io.
-# The init jobs run as Argo CD sync hooks (secret init: PreSync, schema init: PostSync); a failing
+# The init jobs run as Argo CD sync hooks (secret init: PreSync, schema init: Sync); a failing
 # hook fails the sync. The Helm test pod is not used by Argo CD.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -11,7 +11,7 @@ spec:
   source:
     repoURL: ghcr.io/alirionx/charts
     chart: guacamole
-    targetRevision: 0.1.0
+    targetRevision: 0.1.1
     helm:
       valuesObject:
         ingress:

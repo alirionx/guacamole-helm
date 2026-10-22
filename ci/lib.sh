@@ -1,10 +1,12 @@
 #!/bin/bash
 # Shared helpers of the integration tests.
-set -euo pipefail
+set -Eeuo pipefail
 
 CHART="${CHART:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/charts/guacamole}"
 log() { echo "[$(basename "$0")] $*"; }
 die() { echo "[$(basename "$0")] ERROR: $*" >&2; exit 1; }
+# Without this, set -e would end a script silently on a failing command.
+trap 'echo "[$(basename "$0")] ERROR: command failed in line $LINENO: $BASH_COMMAND" >&2' ERR
 
 # Starts a port-forward in the background and waits until it accepts connections.
 # Usage: port_forward <namespace> <resource> <local:remote>

@@ -18,7 +18,10 @@ fi
 current="$(awk '/^version:/ {print $2}' "$CHART/Chart.yaml")"
 log "upgrading from released $previous to $current (database type $TYPE)"
 
-kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+# Start from scratch, so that the test can be repeated on the same cluster.
+helm uninstall guacamole -n "$NS" --wait >/dev/null 2>&1 || true
+kubectl delete namespace "$NS" --ignore-not-found --wait >/dev/null
+kubectl create namespace "$NS" >/dev/null
 kubectl label namespace "$NS" pod-security.kubernetes.io/enforce=restricted --overwrite >/dev/null
 values=(--set "database.type=$TYPE" --set database.embedded.persistence.size=1Gi)
 helm upgrade --install guacamole "$REPO" --version "$previous" -n "$NS" "${values[@]}" --wait --timeout 8m >/dev/null

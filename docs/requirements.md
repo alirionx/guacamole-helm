@@ -24,7 +24,7 @@ The Apache project provides no official Helm chart. Existing community charts se
 | `guacd` (proxy daemon) | Separate Deployment + Service, image `guacamole/guacd`, scalable |
 | Database | Bundled (embedded, default) or external, see section 4 |
 | Secret init | Kubernetes Job (Helm hook `pre-install,pre-upgrade`, Argo CD `PreSync`), creates missing Secrets, see section 4.4 |
-| DB schema init | Kubernetes Job (Helm hook `post-install,post-upgrade`, Argo CD `PostSync`), see section 4.3 |
+| DB schema init | Kubernetes Job (Helm hook `post-install,post-upgrade`, Argo CD `Sync`), see section 4.3. Not `PostSync`: Argo CD runs PostSync hooks only once all resources are healthy, which an Ingress without load balancer status never becomes; the job waits for the database itself. |
 | Exposure | Ingress **and** Gateway API (`HTTPRoute`), both optional and switchable |
 
 Both images are pinned to the same Guacamole version (`appVersion` in the chart, default: current stable version, 1.6.0).
