@@ -26,6 +26,27 @@ release notes show how to read the `guacadmin` password.
 
 See [`examples/`](../../examples) for complete values files.
 
+## Deployment paths
+
+The chart behaves the same with the Helm CLI, in CI pipelines, with Argo CD and with Flux; no
+feature depends on `lookup`, and rendering is deterministic.
+
+| Tool | Init jobs | Failing init job | Helm test |
+|---|---|---|---|
+| Helm CLI / pipelines | Helm hooks (`pre-install,pre-upgrade` / `post-install,post-upgrade`) | `helm upgrade --install --wait` fails (`--atomic` rolls back) | `helm test` |
+| Argo CD | sync hooks (`PreSync` / `PostSync`) | the sync fails | not used |
+| Flux | Helm hooks (helm-controller) | the release fails (remediation per `install`/`upgrade`) | `spec.test.enable: true` |
+
+All four paths are tested against this chart (Argo CD v3.5, Flux v2.9). Examples:
+
+- CLI: [`examples/cli/install.sh`](../../examples/cli/install.sh)
+- Pipelines (lint → `helm diff` → deploy): [`examples/pipelines/github-actions.yaml`](../../examples/pipelines/github-actions.yaml), [`examples/pipelines/gitlab-ci.yml`](../../examples/pipelines/gitlab-ci.yml)
+- Argo CD: [`examples/gitops/argocd-application.yaml`](../../examples/gitops/argocd-application.yaml); one instance per team with an ApplicationSet: [`examples/gitops/argocd-applicationset.yaml`](../../examples/gitops/argocd-applicationset.yaml)
+- Flux: [`examples/gitops/flux-helmrelease.yaml`](../../examples/gitops/flux-helmrelease.yaml)
+
+Under Argo CD the ServiceAccount, Role and RoleBinding of the secret init job remain after a sync
+(hook delete policy `BeforeHookCreation`) and are recreated on the next sync.
+
 ## Database
 
 `database.type` selects `postgresql` (default) or `mysql` (MySQL and MariaDB).

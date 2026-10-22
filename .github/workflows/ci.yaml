@@ -53,13 +53,18 @@ jobs:
               -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
             echo "::endgroup::"
           done
+          # Argo CD and Flux examples (CRD schemas from the catalog)
+          kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            examples/gitops/*.yaml
       - name: README is up to date (helm-docs)
         run: |
           helm-docs --chart-search-root charts
           git diff --exit-code -- "$CHART/README.md" ||
             { echo "::error::README.md is outdated, run helm-docs"; exit 1; }
       - name: shellcheck
-        run: shellcheck -x "$CHART"/files/*.sh ci/*.sh
+        run: shellcheck -x "$CHART"/files/*.sh ci/*.sh examples/cli/*.sh
       - uses: helm/chart-testing-action@v2.9.0
       - name: ct lint
         run: |

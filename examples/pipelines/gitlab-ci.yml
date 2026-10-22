@@ -1,0 +1,44 @@
+# GitLab CI: lint and diff in merge requests, deploy on the default branch. Provide the kubeconfig
+# as a CI/CD variable of type "File" named KUBECONFIG; values live in deploy/guacamole/values.yaml.
+variables:
+  CHART: oci://ghcr.io/alirionx/charts/guacamole
+  CHART_VERSION: "0.1.0"
+  RELEASE: guacamole
+  NAMESPACE: guacamole
+  VALUES: deploy/guacamole/values.yaml
+
+default:
+  image:
+    name: alpine/helm:3.22.1
+    entrypoint: [""]
+
+stages: [lint, diff, deploy]
+
+lint:
+  stage: lint
+  script:
+    - helm template "$RELEASE" "$CHART" --version "$CHART_VERSION" -f "$VALUES" > /dev/null
+  rules:
+    - changes: [deploy/guacamole/**/*]
+
+diff:
+  stage: diff
+  script:
+    - helm plugin install https://github.com/databus23/helm-diff
+    - helm diff upgrade "$RELEASE" "$CHART" --version "$CHART_VERSION" -n "$NAMESPACE" -f "$VALUES" --allow-unreleased
+  rules:
+    - changes: [deploy/guacamole/**/*]
+
+deploy:
+  stage: deploy
+  environment: production
+  resource_group: guacamole
+  script:
+    # --wait fails if an init job (secret or schema init) fails; --atomic rolls back.
+    - >
+      helm upgrade --install "$RELEASE" "$CHART" --version "$CHART_VERSION"
+      -n "$NAMESPACE" --create-namespace -f "$VALUES" --wait --atomic --timeout 10m
+    - helm test "$RELEASE" -n "$NAMESPACE" --logs
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: [deploy/guacamole/**/*]

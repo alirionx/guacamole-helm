@@ -1,0 +1,45 @@
+# Argo CD ApplicationSet: one Guacamole instance per team. Each team has a values file in a
+# configuration repository (teams/<team>/guacamole.yaml); the instance runs in the namespace
+# guacamole-<team>. The chart comes from ghcr.io, the values from Git (multiple sources).
+# Requires the OCI repository declaration from argocd-application.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: guacamole-teams
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/example/platform-config
+        revision: main
+        files:
+          - path: teams/*/guacamole.yaml
+  template:
+    metadata:
+      name: 'guacamole-{{ index .path.segments 1 }}'
+    spec:
+      project: default
+      sources:
+        - repoURL: ghcr.io/alirionx/charts
+          chart: guacamole
+          targetRevision: 0.1.0
+          helm:
+            valueFiles:
+              - '$config/{{ .path.path }}/guacamole.yaml'
+        - repoURL: https://github.com/example/platform-config
+          targetRevision: main
+          ref: config
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: 'guacamole-{{ index .path.segments 1 }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+        managedNamespaceMetadata:
+          labels:
+            pod-security.kubernetes.io/enforce: restricted

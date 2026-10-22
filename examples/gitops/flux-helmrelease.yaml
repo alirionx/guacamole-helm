@@ -1,0 +1,49 @@
+# Flux: the chart from ghcr.io as OCIRepository and a HelmRelease. Flux runs Helm hooks and, with
+# test.enable, the Helm test after every install/upgrade.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: guacamole
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: guacamole
+  namespace: guacamole
+spec:
+  interval: 1h
+  url: oci://ghcr.io/alirionx/charts/guacamole
+  ref:
+    semver: ">=0.1.0 <1.0.0"
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: guacamole
+  namespace: guacamole
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: guacamole
+  install:
+    remediation:
+      retries: 2
+  upgrade:
+    remediation:
+      retries: 2
+  test:
+    enable: true
+  values:
+    httpRoute:
+      enabled: true
+      parentRefs:
+        - name: shared-gateway
+          namespace: gateway-system
+          sectionName: https
+      hostnames: [guacamole.example.com]
