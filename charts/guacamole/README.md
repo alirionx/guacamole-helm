@@ -516,3 +516,8 @@ extensions based on environment variable prefixes.
 | serviceAccount.annotations | object | `{}` | Annotations for the ServiceAccount. |
 | serviceAccount.create | bool | `true` | Create a dedicated ServiceAccount for the guacamole and guacd pods. |
 | serviceAccount.name | string | `""` | Name of the ServiceAccount (default: fullname). Must exist if `create` is false. |
+
+## License
+
+Apache License 2.0, see [LICENSE](../../LICENSE). Apache Guacamole is a trademark of the Apache
+Software Foundation; this chart is not an official Apache project.

@@ -188,5 +188,5 @@ The chart must work equally well in all three variants; no feature may work only
 - [ ] Ingress controller in the target cluster (Traefik, Cilium/Gateway API?)
 - [ ] Session recordings in phase 1 or 2?
 - [ ] Declarative connections (e.g. a job that writes connections from values into the database) — wanted?
-- [ ] Chart license (proposal: Apache-2.0)
+- [x] Chart license: Apache-2.0 (`LICENSE`, Chart annotation `artifacthub.io/license`)
 - [ ] TLS for external databases (`database.external.tls`: SSL mode, CA/client certificates for webapp and schema job) — deferred, after phase 1 scope

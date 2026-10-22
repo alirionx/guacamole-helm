@@ -11,6 +11,8 @@ sources:
   - https://github.com/alirionx/guacamole-helm
   - https://github.com/apache/guacamole-client
   - https://github.com/apache/guacamole-server
+annotations:
+  artifacthub.io/license: Apache-2.0
 keywords:
   - guacamole
   - remote-desktop
