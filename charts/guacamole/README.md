@@ -1,6 +1,6 @@
 # guacamole
 
-![Version: 0.1.1](https://img.shields.io/badge/Version-0.1.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.6.0](https://img.shields.io/badge/AppVersion-1.6.0-informational?style=flat-square)
+![Version: 0.1.2](https://img.shields.io/badge/Version-0.1.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.6.0](https://img.shields.io/badge/AppVersion-1.6.0-informational?style=flat-square)
 
 Apache Guacamole (webapp + guacd) with PostgreSQL or MySQL backend, built for GitOps.
 
@@ -38,6 +38,17 @@ feature depends on `lookup`, and rendering is deterministic.
 | Helm CLI / pipelines | Helm hooks (`pre-install,pre-upgrade` / `post-install,post-upgrade`) | `helm upgrade --install --wait` fails (`--atomic` rolls back) | `helm test` |
 | Argo CD | sync hooks (`PreSync` / `Sync`) | the sync fails | not used |
 | Flux | Helm hooks (helm-controller) | the release fails (remediation per `install`/`upgrade`) | `spec.test.enable: true` |
+| Rancher Fleet | Helm hooks (fleet-agent) | the bundle fails and is retried | not used |
+
+The schema init job waits for the database (up to `initJobs.databaseWaitTimeout`, default 300 s),
+and the first start of the embedded database can take a few minutes. Tools that run Helm with a
+short timeout abort the release while the job is still waiting and retry it in a loop. Give Helm
+enough time, e.g. with Fleet in `fleet.yaml`:
+
+```yaml
+helm:
+  timeoutSeconds: 600
+```
 
 All four paths are tested against this chart (Argo CD v3.5, Flux v2.9). Examples:
 
@@ -79,6 +90,16 @@ CloudNativePG.
 - The PVC and the generated Secrets are kept on `helm uninstall`; a reinstall picks them up again.
   Delete them manually to start from scratch:
   `kubectl delete pvc,secret -l app.kubernetes.io/instance=<release>`.
+- Storage: prefer block storage. PostgreSQL works on NFS (e.g. nfs-subdir-external-provisioner), but
+  every fsync goes over the network: the initialization on first start can take several minutes
+  and the database is slower in general. `database.embedded.startupProbe` allows up to 30 minutes
+  for the first start by default.
+- If the first start is interrupted (e.g. the container was killed during the initialization),
+  PostgreSQL leaves an incomplete data directory and skips the initialization on the next start.
+  Symptoms: `database "postgres" does not exist` or `no pg_hba.conf entry for … user "guacamole"`
+  in the database log. Nothing has been stored yet in this case; delete the PVC and the pod to
+  initialize again (the passwords in `<fullname>-database` are reused):
+  `kubectl delete pvc data-<fullname>-database-0 --wait=false && kubectl delete pod <fullname>-database-0`.
 
 #### Database versions and upgrades
 
@@ -379,6 +400,7 @@ extensions based on environment variable prefixes.
 | database.embedded.database | string | `"guacamole"` | Name of the database created for Guacamole. |
 | database.embedded.existingSecret | string | `""` | Existing Secret (type `Opaque`) holding the passwords of the embedded database. If empty, the secret init job creates the Secret `<fullname>-database` with random passwords. |
 | database.embedded.extraEnv | list | `[]` | Additional environment variables for the database container (list of EnvVar objects). |
+| database.embedded.livenessProbe | object | `{"failureThreshold":6,"periodSeconds":20,"timeoutSeconds":5}` | Liveness probe of the database container. |
 | database.embedded.mariadb.image.digest | string | `""` | Digest of the embedded MariaDB image; takes precedence over `tag`. |
 | database.embedded.mariadb.image.pullPolicy | string | `"IfNotPresent"` | Pull policy of the embedded MariaDB image. |
 | database.embedded.mariadb.image.registry | string | `"docker.io"` | Registry of the embedded MariaDB image. |
@@ -399,10 +421,12 @@ extensions based on environment variable prefixes.
 | database.embedded.postgresql.image.registry | string | `"docker.io"` | Registry of the embedded PostgreSQL image. |
 | database.embedded.postgresql.image.repository | string | `"postgres"` | Repository of the embedded PostgreSQL image. |
 | database.embedded.postgresql.image.tag | string | `"17.11-alpine"` | Tag of the embedded PostgreSQL image. Only change the minor/patch version: a different major version cannot read the existing data (see README). |
+| database.embedded.readinessProbe | object | `{"failureThreshold":3,"periodSeconds":10,"timeoutSeconds":5}` | Readiness probe of the database container. |
 | database.embedded.resources | object | `{"limits":{"memory":"1Gi"},"requests":{"cpu":"100m","memory":"256Mi"}}` | Resource requests and limits of the database container. |
 | database.embedded.secretKey | string | `"password"` | Key within the database Secret holding the application user password. |
 | database.embedded.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Container security context of the database containers. |
 | database.embedded.shmSizeLimit | string | `"256Mi"` | Size limit of the in-memory `/dev/shm` volume (PostgreSQL shared memory). |
+| database.embedded.startupProbe | object | `{"failureThreshold":180,"periodSeconds":10,"timeoutSeconds":5}` | Startup probe of the database container. It also covers the initialization on first start, which can take several minutes on slow storage (e.g. NFS); killing the container during the initialization leaves an unusable data directory. Default: up to 30 minutes. |
 | database.embedded.superuserSecretKey | string | `"superuser-password"` | Key within the database Secret holding the superuser password (`postgres` / MariaDB `root`). |
 | database.embedded.tolerations | list | `[]` | Tolerations. |
 | database.embedded.username | string | `"guacamole"` | Application user owning the Guacamole database (used by the webapp and the schema job). |

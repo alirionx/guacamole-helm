@@ -120,42 +120,20 @@ spec:
             {{- with $values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if $mysql }}
+          {{- /* pg_isready on 127.0.0.1 only succeeds once the final server runs, not the initdb server. */}}
+          {{- $probeCommand := ternary (list "healthcheck.sh" "--connect") (list "pg_isready" "-h" "127.0.0.1" "-U" "postgres") $mysql }}
           startupProbe:
             exec:
-              command: ["healthcheck.sh", "--connect"]
-            periodSeconds: 5
-            failureThreshold: 60
+              command: {{ toJson $probeCommand }}
+            {{- toYaml $values.startupProbe | nindent 12 }}
           readinessProbe:
             exec:
-              command: ["healthcheck.sh", "--connect"]
-            periodSeconds: 10
-            timeoutSeconds: 5
+              command: {{ toJson $probeCommand }}
+            {{- toYaml $values.readinessProbe | nindent 12 }}
           livenessProbe:
             exec:
-              command: ["healthcheck.sh", "--connect"]
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 6
-          {{- else }}
-          # TCP on 127.0.0.1 only succeeds once the final server runs (not the initdb server).
-          startupProbe:
-            exec:
-              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
-            periodSeconds: 5
-            failureThreshold: 60
-          readinessProbe:
-            exec:
-              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
-            periodSeconds: 10
-            timeoutSeconds: 5
-          livenessProbe:
-            exec:
-              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 6
-          {{- end }}
+              command: {{ toJson $probeCommand }}
+            {{- toYaml $values.livenessProbe | nindent 12 }}
           resources:
             {{- toYaml $values.resources | nindent 12 }}
           volumeMounts:

@@ -208,3 +208,36 @@ tests:
       - hasDocuments:
           count: 0
         template: database/configmap.yaml
+  - it: gives the database up to 30 minutes for the first start
+    template: database/statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe
+          value:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 180
+  - it: allows configuring the database probes
+    template: database/statefulset.yaml
+    set:
+      database.type: mysql
+      database.embedded.startupProbe: {periodSeconds: 30, failureThreshold: 120}
+      database.embedded.readinessProbe: {periodSeconds: 15}
+      database.embedded.livenessProbe: {periodSeconds: 60, failureThreshold: 3}
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe
+          value:
+            exec:
+              command: ["healthcheck.sh", "--connect"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 120
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.periodSeconds
+          value: 15
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.failureThreshold
+          value: 3

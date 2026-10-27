@@ -2,7 +2,7 @@ apiVersion: v2
 name: guacamole
 description: Apache Guacamole (webapp + guacd) with PostgreSQL or MySQL backend, built for GitOps.
 type: application
-version: 0.1.1
+version: 0.1.2
 appVersion: "1.6.0"
 kubeVersion: ">=1.29.0-0"
 home: https://github.com/alirionx/guacamole-helm

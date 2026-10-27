@@ -3,7 +3,7 @@
 # the chart deploys Guacamole with an embedded PostgreSQL and generated passwords.
 set -euo pipefail
 
-VERSION=0.1.1
+VERSION=0.1.2
 NAMESPACE=guacamole
 
 # Optional: provide your own Opaque Secret for the guacadmin password instead of a generated one

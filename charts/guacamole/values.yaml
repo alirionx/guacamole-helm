@@ -423,6 +423,24 @@ database:
     # -- Size limit of the in-memory `/dev/shm` volume (PostgreSQL shared memory).
     shmSizeLimit: 256Mi
 
+    # -- Startup probe of the database container. It also covers the initialization on first start,
+    # which can take several minutes on slow storage (e.g. NFS); killing the container during the
+    # initialization leaves an unusable data directory. Default: up to 30 minutes.
+    startupProbe:
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 180
+    # -- Readiness probe of the database container.
+    readinessProbe:
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    # -- Liveness probe of the database container.
+    livenessProbe:
+      periodSeconds: 20
+      timeoutSeconds: 5
+      failureThreshold: 6
+
     # -- Additional environment variables for the database container (list of EnvVar objects).
     extraEnv: []
 

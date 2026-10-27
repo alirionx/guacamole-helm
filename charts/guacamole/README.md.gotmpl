@@ -36,6 +36,17 @@ feature depends on `lookup`, and rendering is deterministic.
 | Helm CLI / pipelines | Helm hooks (`pre-install,pre-upgrade` / `post-install,post-upgrade`) | `helm upgrade --install --wait` fails (`--atomic` rolls back) | `helm test` |
 | Argo CD | sync hooks (`PreSync` / `Sync`) | the sync fails | not used |
 | Flux | Helm hooks (helm-controller) | the release fails (remediation per `install`/`upgrade`) | `spec.test.enable: true` |
+| Rancher Fleet | Helm hooks (fleet-agent) | the bundle fails and is retried | not used |
+
+The schema init job waits for the database (up to `initJobs.databaseWaitTimeout`, default 300 s),
+and the first start of the embedded database can take a few minutes. Tools that run Helm with a
+short timeout abort the release while the job is still waiting and retry it in a loop. Give Helm
+enough time, e.g. with Fleet in `fleet.yaml`:
+
+```yaml
+helm:
+  timeoutSeconds: 600
+```
 
 All four paths are tested against this chart (Argo CD v3.5, Flux v2.9). Examples:
 
@@ -77,6 +88,16 @@ CloudNativePG.
 - The PVC and the generated Secrets are kept on `helm uninstall`; a reinstall picks them up again.
   Delete them manually to start from scratch:
   `kubectl delete pvc,secret -l app.kubernetes.io/instance=<release>`.
+- Storage: prefer block storage. PostgreSQL works on NFS (e.g. nfs-subdir-external-provisioner), but
+  every fsync goes over the network: the initialization on first start can take several minutes
+  and the database is slower in general. `database.embedded.startupProbe` allows up to 30 minutes
+  for the first start by default.
+- If the first start is interrupted (e.g. the container was killed during the initialization),
+  PostgreSQL leaves an incomplete data directory and skips the initialization on the next start.
+  Symptoms: `database "postgres" does not exist` or `no pg_hba.conf entry for … user "guacamole"`
+  in the database log. Nothing has been stored yet in this case; delete the PVC and the pod to
+  initialize again (the passwords in `<fullname>-database` are reused):
+  `kubectl delete pvc data-<fullname>-database-0 --wait=false && kubectl delete pod <fullname>-database-0`.
 
 #### Database versions and upgrades
 

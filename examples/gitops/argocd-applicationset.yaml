@@ -24,7 +24,7 @@ spec:
       sources:
         - repoURL: ghcr.io/alirionx/charts
           chart: guacamole
-          targetRevision: 0.1.1
+          targetRevision: 0.1.2
           helm:
             valueFiles:
               - '$config/{{ .path.path }}/guacamole.yaml'
